@@ -591,6 +591,11 @@ function Home({ setView }: { setView: (v: View) => void }) {
           </div>
         </section>
       </main>
+      <footer className="border-t border-[#123F8C] bg-[#06245C] px-5 py-5 text-center sm:px-10 sm:py-6">
+        <p className="text-sm font-medium leading-6 text-blue-100">
+          © 2026 Innovate4India | Jharkhand Societal Innovation Portal
+        </p>
+      </footer>
     </div>
   );
 }
