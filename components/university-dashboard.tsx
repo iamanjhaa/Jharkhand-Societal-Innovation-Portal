@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ArrowUpRight, CheckCircle2, ClipboardList, Plus, UserRound, Wrench, X } from 'lucide-react'
-import { acceptChallenge, acceptUniversitySponsorship, rejectUniversitySponsorship, downloadChallengeAttachment, getChallenges, getCollaborations, getCurrentUser, getCurrentUserFromStorage, getProjects, getUniversityMembers, getUniversitySponsorships, updateCollaborationStatus, updateProjectStatus, updateProjectTeam, assignChallengeDepartment, getDepartmentMentors, assignChallengeMentor, getClubActivities, getClubMembers, createClubActivity, updateClubActivity, registerForClubActivity } from '@/lib/api'
+import { acceptChallenge, acceptUniversitySponsorship, rejectUniversitySponsorship, downloadChallengeAttachment, getChallenges, getCollaborations, getCurrentUserFromStorage, getProjects, getUniversityMembers, getUniversitySponsorships, updateCollaborationStatus, updateProjectStatus, updateProjectTeam, assignChallengeDepartment, getDepartmentMentors, assignChallengeMentor, getClubActivities, getClubMembers, createClubActivity, updateClubActivity, registerForClubActivity } from '@/lib/api'
 import { createProject } from '@/lib/api'
 import { DashboardHero, DashboardStats } from '@/components/dashboard-shell'
 import { UNIVERSITY_DEPARTMENTS } from '@/lib/university-departments'
@@ -72,6 +72,7 @@ export default function UniversityDashboard() {
   const [savingClubActivity, setSavingClubActivity] = useState(false)
   const [editingClubActivityId, setEditingClubActivityId] = useState('')
   const [registeringActivityId, setRegisteringActivityId] = useState('')
+  const dashboardLoadStarted = useRef(false)
   const showToast = (message: string) => { setToast(message); window.setTimeout(() => setToast(''), 1800) }
   const action = (label: string) => {
     if (label.startsWith('Accept ')) { void handleAcceptChallenge(label.slice(7)); return }
@@ -84,6 +85,8 @@ export default function UniversityDashboard() {
     showToast(`${label} is not available because the backend does not provide this workflow`)
   }
   useEffect(() => {
+    if (dashboardLoadStarted.current) return
+    dashboardLoadStarted.current = true
     async function loadDashboard() {
       const [challengeResponse, projectResponse, collaborationResponse, memberResponse, sponsorshipResponse] = await Promise.all([getChallenges(), getProjects(), getCollaborations(), getUniversityMembers(), getUniversitySponsorships()])
       if (!challengeResponse.success || !projectResponse.success || !collaborationResponse.success || !memberResponse.success || !sponsorshipResponse.success) {
@@ -97,14 +100,11 @@ export default function UniversityDashboard() {
       setUniversityMembers(memberResponse.data || [])
       setSponsorshipData(sponsorshipResponse.data || [])
       setSelectedProjectId(projectResponse.data?.[0]?._id || '')
-      const userResponse = await getCurrentUser()
-      if (userResponse.success && userResponse.data?.user) {
-        setCurrentUser(userResponse.data.user)
-        if (userResponse.data.user.primaryClub) {
-          const [activitiesResponse, membersResponse] = await Promise.all([getClubActivities(userResponse.data.user.primaryClub), getClubMembers(userResponse.data.user.primaryClub)])
+      const user = getCurrentUserFromStorage()
+      if (user?.primaryClub) {
+          const [activitiesResponse, membersResponse] = await Promise.all([getClubActivities(user.primaryClub), getClubMembers(user.primaryClub)])
           if (activitiesResponse.success) setClubActivities(activitiesResponse.data || [])
           if (membersResponse.success) setClubMembers(membersResponse.data || [])
-        }
       }
       setLoading(false)
     }

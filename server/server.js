@@ -30,9 +30,6 @@ const app = express();
 const PORT = Number.parseInt(process.env.PORT || '5000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 
-// Connect to MongoDB
-connectDB();
-
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -75,10 +72,25 @@ app.use(notFound);
 // Error Handler Middleware
 app.use(errorHandler);
 
-// Start Server
-app.listen(PORT, HOST, () => {
-  console.log(`\n✓ Server running on http://${HOST}:${PORT}`);
-  console.log(`✓ Environment: ${process.env.NODE_ENV || 'development'}\n`);
-});
+// Connect to MongoDB before accepting requests so auth never runs against an
+// unready database connection.
+const startServer = async () => {
+  try {
+    if (!process.env.JWT_SECRET) {
+      throw new Error('JWT_SECRET is not defined in the project-root .env file');
+    }
+
+    await connectDB();
+    app.listen(PORT, HOST, () => {
+      console.log(`\n✓ Server running on http://${HOST}:${PORT}`);
+      console.log(`✓ Environment: ${process.env.NODE_ENV || 'development'}\n`);
+    });
+  } catch (error) {
+    console.error(`✗ Server startup failed: ${error.message}`);
+    process.exitCode = 1;
+  }
+};
+
+startServer();
 
 export default app;

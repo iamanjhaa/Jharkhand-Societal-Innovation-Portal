@@ -46,6 +46,7 @@ export async function getDepartmentChallengeMentors(challengeId: string) {
 }
 
 const apiBaseUrl = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
+const API_REQUEST_TIMEOUT_MS = 15000;
 
 function resolveApiUrl(endpoint: string) {
   if (/^https?:\/\//i.test(endpoint)) return endpoint;
@@ -65,13 +66,37 @@ export async function apiCall<T>(
   const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
   if (token) headers.set('Authorization', `Bearer ${token}`);
 
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  let removeExternalAbortListener: (() => void) | undefined;
   try {
+    const controller = new AbortController();
+    if (options.signal) {
+      if (options.signal.aborted) controller.abort();
+      else {
+        const abortExternalRequest = () => controller.abort();
+        options.signal.addEventListener('abort', abortExternalRequest, { once: true });
+        removeExternalAbortListener = () => options.signal?.removeEventListener('abort', abortExternalRequest);
+      }
+    }
+    timeoutId = setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
     const response = await fetch(resolveApiUrl(endpoint), {
       ...options,
       headers,
+      signal: controller.signal,
     });
 
-    const data = await response.json();
+    const responseText = await response.text();
+    let data: Partial<ApiResponse<T>> = {};
+    if (responseText.trim()) {
+      try {
+        data = JSON.parse(responseText) as Partial<ApiResponse<T>>;
+      } catch {
+        data = {
+          success: false,
+          message: responseText.trim(),
+        };
+      }
+    }
 
     if (!response.ok) {
       return {
@@ -87,8 +112,13 @@ export async function apiCall<T>(
   } catch (error) {
     return {
       success: false,
-      message: error instanceof Error ? error.message : 'An error occurred',
+      message: error instanceof DOMException && error.name === 'AbortError'
+        ? 'The request timed out. Please check the backend connection and try again.'
+        : error instanceof Error ? error.message : 'An error occurred',
     };
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+    removeExternalAbortListener?.();
   }
 }
 
@@ -255,12 +285,24 @@ export type PortalNotification = {
   relatedEntityId?: string | null;
 };
 
-export async function searchPortal(query: string) {
-  return apiCall<PortalSearchResult[]>(`/api/search?q=${encodeURIComponent(query)}`, { method: 'GET' });
+export async function searchPortal(query: string, signal?: AbortSignal) {
+  return apiCall<PortalSearchResult[]>(`/api/search?q=${encodeURIComponent(query)}`, { method: 'GET', signal });
 }
 
+let notificationsRequest: Promise<ApiResponse<{ notifications: PortalNotification[]; unreadCount: number }>> | null = null;
+let notificationsCache: { expiresAt: number; response: ApiResponse<{ notifications: PortalNotification[]; unreadCount: number }> } | null = null;
+
 export async function getNotifications() {
-  return apiCall<{ notifications: PortalNotification[]; unreadCount: number }>('/api/notifications?page=1&limit=20', { method: 'GET' });
+  if (notificationsCache && notificationsCache.expiresAt > Date.now()) return notificationsCache.response;
+  if (notificationsRequest) return notificationsRequest;
+  notificationsRequest = apiCall<{ notifications: PortalNotification[]; unreadCount: number }>('/api/notifications?page=1&limit=20', { method: 'GET' });
+  try {
+    const response = await notificationsRequest;
+    if (response.success) notificationsCache = { expiresAt: Date.now() + 500, response };
+    return response;
+  } finally {
+    notificationsRequest = null;
+  }
 }
 
 export async function markNotificationRead(id: string) {
@@ -311,8 +353,31 @@ export async function reverseGeocode(latitude: number, longitude: number) {
   });
 }
 
+let rewardsRequest: Promise<ApiResponse<{
+  summary: {
+    impactTokens: number;
+    lifetimeImpactTokens: number;
+    totalVerifiedProblems: number;
+    totalRewardsRedeemed: number;
+    totalRewardAmountRedeemed: number;
+    virtualCashBalance: number;
+    redeemableBlocks: number;
+    rewardAmount: number;
+    nextRewardTokens: number;
+  };
+  history: Array<{
+    tokensRedeemed: number;
+    rewardAmount: number;
+    status: string;
+    redeemedAt: string;
+  }>;
+}>> | null = null;
+let rewardsCache: { expiresAt: number; response: ApiResponse<any> } | null = null;
+
 export async function getMyRewards() {
-  return apiCall<{
+  if (rewardsCache && rewardsCache.expiresAt > Date.now()) return rewardsCache.response;
+  if (rewardsRequest) return rewardsRequest;
+  rewardsRequest = apiCall<{
     summary: {
       impactTokens: number;
       lifetimeImpactTokens: number;
@@ -331,9 +396,17 @@ export async function getMyRewards() {
       redeemedAt: string;
     }>;
   }>('/api/rewards/me', { method: 'GET' });
+  try {
+    const response = await rewardsRequest;
+    if (response.success) rewardsCache = { expiresAt: Date.now() + 500, response };
+    return response;
+  } finally {
+    rewardsRequest = null;
+  }
 }
 
 export async function redeemMyReward() {
+  rewardsCache = null;
   return apiCall('/api/rewards/redeem', { method: 'POST', body: JSON.stringify({}) });
 }
 
@@ -474,7 +547,7 @@ export async function getProjects() {
     progressPercentage?: number;
     currentStage?: string;
     completedWork?: string;
-    progressUpdates?: { stage: string; percentage: number; description: string; updatedBy?: string; updatedAt?: string }[];
+    progressUpdates?: { stage: string; percentage: number; description?: string; updatedBy?: string; updatedAt?: string }[];
     remainingWork?: string;
     nextTask?: string;
     assignmentStatus?: 'unassigned' | 'pending' | 'awaiting_acceptance' | 'accepted';
@@ -541,7 +614,7 @@ export async function getProjectById(id: string) {
     progressPercentage?: number;
     currentStage?: string;
     completedWork?: string;
-    progressUpdates?: { stage: string; percentage: number; description: string; updatedBy?: string; updatedAt?: string }[];
+    progressUpdates?: { stage: string; percentage: number; description?: string; updatedBy?: string; updatedAt?: string }[];
     solutionSummary?: string;
     expectedImpact?: string;
     estimatedBudget?: number;
@@ -582,14 +655,10 @@ export async function updateProjectStatus(id: string, status: string) {
   });
 }
 
-export async function updateProjectProgress(id: string, progress: {
-  progressPercentage: number;
-  currentStage: string;
-  description: string;
-}) {
+export async function updateProjectProgress(id: string, currentStage: string) {
   return apiCall(`/api/projects/${encodeURIComponent(id)}/progress`, {
     method: 'PATCH',
-    body: JSON.stringify(progress),
+    body: JSON.stringify({ currentStage }),
   });
 }
 
@@ -788,6 +857,13 @@ export function clearAuthToken() {
   if (typeof window !== 'undefined') {
     localStorage.removeItem('auth_token');
     localStorage.removeItem('current_user');
+    localStorage.removeItem('role');
+    localStorage.removeItem('dashboard_view');
+    sessionStorage.removeItem('auth_token');
+    sessionStorage.removeItem('current_user');
+    sessionStorage.removeItem('role');
+    sessionStorage.removeItem('dashboard_view');
+    sessionStorage.removeItem('auth_session_fresh');
   }
 }
 
@@ -797,10 +873,26 @@ export function saveCurrentUser(user: Record<string, any>) {
   }
 }
 
+export function saveAuthSession(token: string, user: Record<string, any>) {
+  clearAuthToken();
+  saveAuthToken(token);
+  saveCurrentUser(user);
+  if (typeof window !== 'undefined') {
+    sessionStorage.setItem('auth_session_fresh', '1');
+    window.setTimeout(() => sessionStorage.removeItem('auth_session_fresh'), 2000);
+  }
+}
+
 export function getCurrentUserFromStorage() {
   if (typeof window !== 'undefined') {
     const user = localStorage.getItem('current_user');
-    return user ? JSON.parse(user) : null;
+    if (!user) return null;
+    try {
+      return JSON.parse(user);
+    } catch {
+      localStorage.removeItem('current_user');
+      return null;
+    }
   }
   return null;
 }

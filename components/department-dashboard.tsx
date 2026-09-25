@@ -20,6 +20,7 @@ const sections: { key: DepartmentSection; label: string }[] = [
   { key: 'library', label: 'Solution Library' },
   { key: 'profile', label: 'Profile' },
 ]
+const stageProgress: Record<string, number> = { proposed: 0, prototype: 25, testing: 50, deployed: 75, completed: 100 }
 
 function Badge({ children, tone = 'slate' }: { children: React.ReactNode; tone?: 'slate' | 'green' | 'amber' | 'blue' }) {
   const colors = { slate: 'bg-slate-100 text-slate-600', green: 'bg-emerald-50 text-emerald-700', amber: 'bg-amber-50 text-amber-800', blue: 'bg-blue-50 text-blue-700' }
@@ -77,8 +78,7 @@ export default function DepartmentDashboard({ user, section = 'problems', onSect
   const [researcherSelection, setResearcherSelection] = useState<string[]>([])
   const [projectForm, setProjectForm] = useState({ title: '', objective: '', description: '', technology: '' })
   const [progressProject, setProgressProject] = useState<Project | null>(null)
-  const [progressPercentage, setProgressPercentage] = useState<string>('0')
-  const [progressForm, setProgressForm] = useState({ currentStage: 'proposed', progressDescription: '', progressDescriptions: {} as Record<string, string> })
+  const [progressForm, setProgressForm] = useState({ currentStage: 'proposed' })
   const [teamSelection, setTeamSelection] = useState<string[]>([])
   const [solutionProject, setSolutionProject] = useState<Project | null>(null)
   const [solution, setSolution] = useState({ solutionTitle: '', solutionDescription: '', solutionApproach: '', technology: '', implementationDetails: '', expectedOutcome: '' })
@@ -127,14 +127,6 @@ export default function DepartmentDashboard({ user, section = 'problems', onSect
   const eligibleResearchers = eligibleMembers.filter((member) => hasAccountType(member, 'researcher'))
   const libraryProjects = projects.filter((project) => project.solutionStatus === 'submitted' && (project.status === 'deployed' || project.status === 'completed'))
   const stageLabels = ['proposed', 'prototype', 'testing', 'deployed', 'completed']
-  const parsedProgressPercentage = Number(progressPercentage)
-  const isProgressPercentageValid = /^\d+$/.test(progressPercentage) && Number.isInteger(parsedProgressPercentage) && parsedProgressPercentage >= 0 && parsedProgressPercentage <= 100
-  const progressDescriptionLength = progressForm.progressDescription.trim().length
-  const descriptionWords = progressForm.progressDescription.trim().match(/[a-z0-9]+/gi) || []
-  const hasMeaningfulDescription = descriptionWords.length >= 3
-    && new Set(descriptionWords.map((word) => word.toLowerCase())).size >= 3
-    && !/^(done|ok|completed|g+)([\s.!]*)$/i.test(progressForm.progressDescription.trim())
-  const isCompletedDescriptionValid = progressForm.currentStage !== 'completed' || /\b(complet|implement|result|outcome|solution|deplo|test)\w*/i.test(progressForm.progressDescription)
 
   async function saveTeam() {
     if (!teamProject || busy) return
@@ -154,6 +146,14 @@ export default function DepartmentDashboard({ user, section = 'problems', onSect
 
   async function saveProject() {
     if (!createTarget || busy) return
+    const title = projectForm.title.trim()
+    const objective = projectForm.objective.trim()
+    const description = projectForm.description.trim()
+    if (!title || !objective || !description) {
+      setNoticeTone('error')
+      setNotice('Project title, objective, and description are required.')
+      return
+    }
     if (!studentSelection.length || !researcherSelection.length) {
       setNoticeTone('error')
       setNotice('Select at least one Student and one Researcher before creating a project.')
@@ -162,23 +162,36 @@ export default function DepartmentDashboard({ user, section = 'problems', onSect
     const assignedMentor = createTarget.departmentMentor?._id
     if (!assignedMentor) { setNoticeTone('error'); return setNotice('A faculty mentor must be assigned before creating a project.') }
     setBusy(true)
-    const response = await createProject({
-      title: projectForm.title,
-      description: projectForm.description,
-      challenge: createTarget._id,
-      universityDepartment: createTarget.department || user.universityDepartment || '',
-      facultyMentor: assignedMentor,
-      projectType: 'multidisciplinary_project',
-      solutionSummary: projectForm.objective,
-      expectedImpact: projectForm.objective,
-      teamMembers: [...studentSelection, ...researcherSelection],
-      estimatedBudget: 0,
-      timeline: { startDate: new Date().toISOString().slice(0, 10), expectedCompletionDate: new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10) },
-    })
-    setNoticeTone(response.success ? 'success' : 'error')
-    setNotice(response.success ? 'Project created successfully.' : response.message || 'Unable to create project.')
-    if (response.success) { setCreateTarget(null); setProjectForm({ title: '', objective: '', description: '', technology: '' }); setStudentSelection([]); setResearcherSelection([]); await refresh() }
-    setBusy(false)
+    try {
+      const response = await createProject({
+        title,
+        description,
+        challenge: createTarget._id,
+        universityDepartment: createTarget.department || user.universityDepartment || '',
+        facultyMentor: assignedMentor,
+        projectType: 'multidisciplinary_project',
+        solutionSummary: objective,
+        expectedImpact: objective,
+        teamMembers: [...studentSelection, ...researcherSelection],
+        estimatedBudget: 0,
+        timeline: { startDate: new Date().toISOString().slice(0, 10), expectedCompletionDate: new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10) },
+      })
+      setNoticeTone(response.success ? 'success' : 'error')
+      setNotice(response.success ? 'Project created successfully.' : response.message || 'Unable to create project.')
+      if (response.success) {
+        setCreateTarget(null)
+        setProjectForm({ title: '', objective: '', description: '', technology: '' })
+        setStudentSelection([])
+        setResearcherSelection([])
+        await refresh()
+      }
+    } catch (error) {
+      console.error('Project creation failed', error)
+      setNoticeTone('error')
+      setNotice(error instanceof Error ? error.message : 'Unable to create project.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function openMentorSelection(challenge: Challenge) {
@@ -200,41 +213,25 @@ export default function DepartmentDashboard({ user, section = 'problems', onSect
 
   async function saveProgress() {
     if (!progressProject || busy) return
-    const description = progressForm.progressDescription.trim()
-    if (!isProgressPercentageValid) {
+    const stageIndex = stageLabels.indexOf(progressProject.currentStage || 'proposed')
+    const nextStage = stageLabels[stageIndex + 1]
+    if (!nextStage || progressForm.currentStage !== nextStage) {
       setNoticeTone('error')
-      setNotice(progressForm.currentStage === 'completed' ? 'Completed stage requires 100% progress.' : 'Progress percentage must be an integer between 0 and 100.')
-      return
-    }
-    if (parsedProgressPercentage === 100 && progressForm.currentStage !== 'completed') {
-      setNoticeTone('error'); setNotice('100% progress requires the Completed stage.')
-      return
-    }
-    if (progressForm.currentStage === 'completed' && parsedProgressPercentage !== 100) {
-      setNoticeTone('error'); setNotice('Completed stage requires 100% progress.')
-      return
-    }
-    const teamMembers = progressProject.teamMembers || []
-    const hasStudent = teamMembers.some((member) => hasAccountType(member, 'student'))
-    const hasResearcher = teamMembers.some((member) => hasAccountType(member, 'researcher'))
-    if (!hasStudent || !hasResearcher) {
-      setNoticeTone('error'); setNotice('Select at least one Student and one Researcher before updating project progress.')
-      return
-    }
-    if (!description || description.length < 20 || !hasMeaningfulDescription || !isCompletedDescriptionValid) {
-      setNoticeTone('error'); setNotice('Please describe the work completed for the selected stage. Minimum 20 characters required.')
+      setNotice('The project can only move to its next stage.')
       return
     }
     setBusy(true)
-    const response = await updateProjectProgress(progressProject._id, {
-      progressPercentage: parsedProgressPercentage,
-      currentStage: progressForm.currentStage,
-      description,
-    })
-    setNoticeTone(response.success ? 'success' : 'error')
-    setNotice(response.success ? 'Project progress updated.' : response.message || 'Unable to update project progress.')
-    if (response.success) { setProgressProject(null); await refresh() }
-    setBusy(false)
+    try {
+      const response = await updateProjectProgress(progressProject._id, progressForm.currentStage)
+      setNoticeTone(response.success ? 'success' : 'error')
+      setNotice(response.success ? `Project moved to ${progressForm.currentStage}.` : response.message || 'Unable to update project progress.')
+      if (response.success) { setProgressProject(null); await refresh() }
+    } catch (error) {
+      setNoticeTone('error')
+      setNotice(error instanceof Error ? error.message : 'Unable to update project progress.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function openProgress(project: Project) {
@@ -246,24 +243,48 @@ export default function DepartmentDashboard({ user, section = 'problems', onSect
     }
     const latestProject = response.data
     const currentStage = stageLabels.includes(latestProject.currentStage || '') ? latestProject.currentStage || 'proposed' : 'proposed'
-    const currentUpdate = latestProject.progressUpdates?.find((update) => update.stage === currentStage)
+    const currentStageIndex = stageLabels.indexOf(currentStage)
+    const nextStage = stageLabels[currentStageIndex + 1] || currentStage
     setProgressProject(latestProject)
-    setProgressPercentage(String(latestProject.progressPercentage ?? 0))
-    setProgressForm({
-      currentStage,
-      progressDescription: currentUpdate?.description || latestProject.completedWork || '',
-      progressDescriptions: Object.fromEntries((latestProject.progressUpdates || []).map((update) => [update.stage, update.description])),
-    })
+    setProgressForm({ currentStage: nextStage })
   }
 
   async function saveSolution(status: 'draft' | 'submitted') {
     if (!solutionProject || busy) return
+    const solutionTitle = solution.solutionTitle.trim()
+    const solutionDescription = solution.solutionDescription.trim()
+    const solutionApproach = solution.solutionApproach.trim()
+    const expectedOutcome = solution.expectedOutcome.trim()
+    if (status === 'submitted' && (!solutionTitle || !solutionDescription || !solutionApproach || !expectedOutcome)) {
+      setNoticeTone('error')
+      setNotice('Solution title, proposed solution, approach, and expected outcome are required before submission.')
+      return
+    }
     setBusy(true)
-    const response = await updateProjectSolution(solutionProject._id, { ...solution, solutionStatus: status })
-    setNoticeTone(response.success ? 'success' : 'error')
-    setNotice(response.success ? status === 'submitted' ? 'Solution submitted for the existing authorized completion workflow.' : 'Solution draft saved.' : response.message || 'Unable to save solution.')
-    if (response.success) { setSolutionProject(null); await refresh() }
-    setBusy(false)
+    try {
+      const response = await updateProjectSolution(solutionProject._id, {
+        ...solution,
+        solutionTitle,
+        solutionDescription,
+        solutionApproach,
+        expectedOutcome,
+        solutionStatus: status,
+      })
+      setNoticeTone(response.success ? 'success' : 'error')
+      setNotice(response.success
+        ? status === 'submitted' ? 'Solution saved successfully.' : 'Solution draft saved.'
+        : response.message || 'Unable to save solution.')
+      if (response.success) {
+        setSolutionProject(null)
+        await refresh()
+      }
+    } catch (error) {
+      console.error('Solution save failed', error)
+      setNoticeTone('error')
+      setNotice(error instanceof Error ? error.message : 'Unable to save solution.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function findRecommendations(challenge: Challenge) {
@@ -298,16 +319,19 @@ export default function DepartmentDashboard({ user, section = 'problems', onSect
     <div className="mt-6 grid gap-3 sm:grid-cols-5">{sections.map(({ key, label }) => <button key={key} onClick={() => onSectionChange?.(key)} className={`rounded-xl border px-3 py-3 text-left text-sm font-bold ${section === key ? 'border-blue-700 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white text-slate-700'}`}>{label}</button>)}</div>
     <div id="department-problems" className="mt-6"><Card eyebrow="Coordinator-routed work" title="Assigned Problems"><div className="relative"><Search className="absolute left-3 top-3 size-4 text-slate-400" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search problems" className="w-full rounded-lg border border-slate-200 py-2.5 pl-9 pr-3 text-sm" /></div><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead className="border-b border-slate-200 text-xs uppercase tracking-wider text-slate-400"><tr><th className="pb-3 pr-4">Problem</th><th className="pb-3 pr-4">Urgency</th><th className="pb-3 pr-4">Mentor</th><th className="pb-3 pr-4">Funding</th><th className="pb-3">Created</th></tr></thead><tbody className="divide-y divide-slate-100">{visibleChallenges.map((challenge) => <tr key={challenge._id} onClick={() => setSelected(challenge)} className="cursor-pointer hover:bg-slate-50"><td className="py-4 pr-4"><p className="font-bold text-blue-800">{challenge.title}</p><p className="mt-1 text-xs text-slate-500">{challenge.category} · {challenge.district}</p><button onClick={(event) => { event.stopPropagation(); void findRecommendations(challenge) }} className="mt-2 rounded-md border border-violet-200 px-2 py-1 text-xs font-bold text-violet-800">Find AI Solutions</button></td><td className="py-4 pr-4"><Badge tone={challenge.urgency === 'HIGH' || challenge.urgency === 'CRITICAL' ? 'amber' : 'slate'}>{challenge.urgency || challenge.priority}</Badge></td>    <td className="py-4 pr-4 text-slate-600">{challenge.departmentMentor ? <><span>{challenge.departmentMentor.name}</span><span className="block text-xs text-emerald-700">Assigned</span></> : <button onClick={(event) => { event.stopPropagation(); void openMentorSelection(challenge) }} className="rounded-md border border-blue-200 px-2 py-1 text-xs font-bold text-blue-800">Select Mentor</button>}</td>    <td className="py-4 pr-4 text-slate-600">{challenge.industryFundingStatus || 'Not recorded'}{challenge.industryFundingStatus && !['accepted', 'proposal_accepted', 'funded'].includes(challenge.industryFundingStatus) && <span className="ml-2 text-xs font-bold text-amber-700">Waiting for Industry Funding Approval</span>}</td><td className="py-4 text-slate-500">{date(challenge.createdAt)}{!projects.some((project) => project.challenge?._id === challenge._id) && <button disabled={!challenge.departmentMentor || !['accepted', 'proposal_accepted', 'funded'].includes(challenge.industryFundingStatus || '')} onClick={(event) => { event.stopPropagation(); setCreateTarget(challenge) }} className="mt-2 block rounded-md bg-[#06245C] px-3 py-1.5 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">Create Project</button>}</td></tr>)}</tbody></table>{!visibleChallenges.length && <p className="py-8 text-center text-sm text-slate-500">No problems are assigned to this department.</p>}</div></Card></div>
     <div id="department-project" className="mt-6"><Card eyebrow="Mentor-led execution" title="Project"><div className="space-y-3">{projects.map((project) => <article key={project._id} className="rounded-xl border border-slate-200 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-bold text-slate-900">{project.title}</h3><p className="mt-1 text-sm text-slate-600">{project.challenge?.title || 'Linked problem unavailable'} · {project.facultyMentor?.name || 'Mentor not assigned'}</p></div><Badge tone="blue">{project.status.replaceAll('_', ' ')}</Badge></div><dl className="mt-3 grid gap-2 text-xs text-slate-600 sm:grid-cols-2"><div><dt className="font-bold text-slate-400">Objective</dt><dd>{project.solutionSummary || 'Not provided'}</dd></div><div><dt className="font-bold text-slate-400">Department</dt><dd>{project.universityDepartment || 'Not provided'}</dd></div><div><dt className="font-bold text-slate-400">Funding</dt><dd>{project.challenge?.industryFundingStatus || 'Not recorded'}{project.challenge?.industryFundingAmount ? ` · ₹${project.challenge.industryFundingAmount.toLocaleString('en-IN')}` : ''}</dd></div><div><dt className="font-bold text-slate-400">Team</dt><dd>{project.teamMembers?.length || 0} members: {project.teamMembers?.map((member) => member.name).filter(Boolean).join(', ') || 'None'}</dd></div></dl>{project.facultyMentor?._id === user._id && <button onClick={() => { setTeamProject(project); setTeamSelection((project.teamMembers || []).map((member) => member._id).filter((id): id is string => Boolean(id))) }} className="mt-4 rounded-md bg-[#06245C] px-3 py-2 text-xs font-bold text-white">Build project team</button>}<button onClick={() => openProgress(project)} className="ml-2 mt-4 rounded-md border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700">Update progress</button>{project.facultyMentor?._id === user._id && <button onClick={() => openSolution(project)} className="ml-2 mt-4 rounded-md border border-emerald-200 px-3 py-2 text-xs font-bold text-emerald-800">Edit solution</button>}</article>)}{!projects.length && <p className="text-sm text-slate-500">Create a project after Industry funding is approved.</p>}</div></Card></div>
-    <div id="department-progress" className="mt-6"><Card eyebrow="Persistent project tracking" title="Progress"><div className="space-y-3">{projects.map((project) => <div key={project._id} className="rounded-xl border border-slate-200 p-4"><div className="flex items-center justify-between gap-3"><p className="font-bold text-slate-900">{project.title}</p><span className="text-sm font-bold text-blue-800">Current Progress: {project.progressPercentage || 0}%</span></div><p className="mt-2 text-sm font-semibold text-slate-700">Current Stage: {project.currentStage || project.status}</p><div className="mt-3 h-2 rounded-full bg-slate-100"><div className="h-2 rounded-full bg-blue-700" style={{ width: `${project.progressPercentage || 0}%` }} /></div><div className="mt-4 space-y-2">{stageLabels.map((stage, index) => { const update = project.progressUpdates?.find((item) => item.stage === stage); const currentIndex = stageLabels.indexOf(project.currentStage || 'proposed'); const displayedPercentage = update?.percentage ?? (stage === project.currentStage ? project.progressPercentage : undefined); return <div key={stage} className="flex gap-2 text-sm"><span className="w-4 text-slate-500">{update ? '✓' : index === currentIndex ? '→' : '○'}</span><div><p className="font-semibold capitalize text-slate-700">{stage} — {displayedPercentage === undefined ? '—' : `${displayedPercentage}%`}</p>{update && <p className="text-xs text-slate-500">{update.description}</p>}</div></div> })}</div></div>)}{!projects.length && <p className="text-sm text-slate-500">Progress appears after a funded project is created.</p>}</div></Card></div>
-    <div id="department-library" className="mt-6"><Card eyebrow="Reusable knowledge" title="Solution Library"><p className="text-sm text-slate-600">Only submitted solutions attached to deployed or completed projects appear here. Select an assigned problem to find potentially reusable verified approaches.</p><div className="mt-4 grid gap-3 md:grid-cols-2">{libraryProjects.map((project) => <article key={project._id} className="rounded-xl border border-slate-200 p-4"><div className="flex items-start justify-between gap-3"><div><h3 className="font-bold text-slate-900">{project.solutionTitle || project.title}</h3><p className="mt-1 text-xs text-slate-500">{project.challenge?.category} · {project.universityDepartment}</p></div><Badge tone="green">Verified lifecycle stage</Badge></div><p className="mt-3 text-sm text-slate-600">{project.solutionDescription || 'Solution description not provided.'}</p><p className="mt-3 text-xs text-slate-500">Technology: {project.technology || 'Not recorded'}</p></article>)}{!libraryProjects.length && <div className="rounded-xl border border-dashed border-slate-300 p-6 text-center"><BookOpen className="mx-auto size-6 text-slate-400" /><p className="mt-2 text-sm font-bold text-slate-700">No solutions are eligible for the library yet.</p><p className="mt-1 text-xs text-slate-500">Complete the existing deployment and verification workflow first.</p></div>}</div></Card></div>
+    <div id="department-progress" className="mt-6"><Card eyebrow="Stage-based lifecycle" title="Project Progress"><div className="space-y-5">{projects.map((project) => { const currentStage = stageLabels.includes(project.currentStage || '') ? project.currentStage || 'proposed' : 'proposed'; const currentIndex = stageLabels.indexOf(currentStage); const derivedProgress = stageProgress[currentStage]; return <article key={project._id} className="rounded-xl border border-slate-200 p-4"><div className="flex items-center justify-between gap-3"><p className="font-bold text-slate-900">{project.title}</p><span className="text-sm font-bold text-blue-800">{currentStage} · {derivedProgress}%</span></div>{currentStage === 'completed' && <p className="mt-2 text-sm font-bold text-emerald-700">Work Finished / Project Completed</p>}<div className="mt-3 h-2 rounded-full bg-slate-100"><div className="h-2 rounded-full bg-blue-700 transition-all" style={{ width: `${derivedProgress}%` }} /></div><div className="mt-5 space-y-3">{stageLabels.map((stage, index) => { const complete = index <= currentIndex; return <div key={stage} className="flex items-start gap-3 text-sm"><span className={`mt-0.5 text-base font-bold ${complete ? 'text-emerald-600' : 'text-slate-400'}`}>{complete ? '✓' : '○'}</span><div><p className="font-semibold capitalize text-slate-800">{stage}</p><p className="text-xs text-slate-500">{complete ? 'Completed' : 'Pending'}</p></div></div>})}</div></article> })}{!projects.length && <p className="text-sm text-slate-500">Progress appears after a funded project is created.</p>}</div></Card></div><div id="department-library" className="mt-6"><Card eyebrow="Reusable knowledge" title="Solution Library"><p className="text-sm text-slate-600">Only submitted solutions attached to deployed or completed projects appear here. Select an assigned problem to find potentially reusable verified approaches.</p><div className="mt-4 grid gap-3 md:grid-cols-2">{libraryProjects.map((project) => <article key={project._id} className="rounded-xl border border-slate-200 p-4"><div className="flex items-start justify-between gap-3"><div><h3 className="font-bold text-slate-900">{project.solutionTitle || project.title}</h3><p className="mt-1 text-xs text-slate-500">{project.challenge?.category} · {project.universityDepartment}</p></div><Badge tone="green">Verified lifecycle stage</Badge></div><p className="mt-3 text-sm text-slate-600">{project.solutionDescription || 'Solution description not provided.'}</p><p className="mt-3 text-xs text-slate-500">Technology: {project.technology || 'Not recorded'}</p></article>)}{!libraryProjects.length && <div className="rounded-xl border border-dashed border-slate-300 p-6 text-center"><BookOpen className="mx-auto size-6 text-slate-400" /><p className="mt-2 text-sm font-bold text-slate-700">No solutions are eligible for the library yet.</p><p className="mt-1 text-xs text-slate-500">Complete the existing deployment and verification workflow first.</p></div>}</div></Card></div>
     <div id="department-profile" className="mt-6"><Card eyebrow="Authorized account" title="Profile"><div className="grid gap-3 sm:grid-cols-2">{[['Name', user.name], ['Email', user.email], ['University', user.institution], ['Department', user.universityDepartment], ['Account type', user.accountType], ['Permission', 'University department access']].map(([label, value]) => <div key={String(label)} className="rounded-lg bg-slate-50 p-3"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</p><p className="mt-1 text-sm font-semibold text-slate-800">{value || 'Not available'}</p></div>)}</div></Card></div>
     {selected && <ChallengeDetails challenge={selected} projects={projects} onClose={() => setSelected(null)} />}
     {recommendationChallenge && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4"><div role="dialog" aria-modal="true" className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between gap-4"><div><p className="text-[11px] font-bold uppercase tracking-wider text-violet-700">AI Recommended</p><h2 className="mt-1 text-xl font-bold text-slate-950">AI Solution Recommendations</h2><p className="mt-2 text-sm text-slate-600">AI searched previously verified solutions for potentially reusable approaches. Review before reuse.</p></div><button onClick={() => setRecommendationChallenge(null)} aria-label="Close recommendations"><X className="size-5 text-slate-500" /></button></div>{recommendationBusy ? <p className="mt-6 text-sm font-semibold text-slate-600">Finding relevant solutions...</p> : !recommendations ? <p className="mt-6 text-sm text-red-700">AI recommendations are temporarily unavailable. You can browse the Solution Library manually.</p> : !recommendations.recommendations.length ? <p className="mt-6 text-sm text-slate-600">No verified previous solution was found for this problem yet.</p> : <div className="mt-6 space-y-4">{recommendations.recommendations.map((recommendation) => <article key={recommendation.solutionId} className="rounded-xl border border-violet-100 bg-violet-50/40 p-4"><h3 className="font-bold text-slate-900">{recommendation.solution.solutionTitle || recommendation.solution.title}</h3><p className="mt-1 text-sm text-slate-600">Original problem: {recommendation.solution.challenge?.title || 'Verified societal problem'}</p><p className="mt-3 text-sm text-slate-700">{recommendation.reason}</p><p className="mt-2 text-xs text-slate-500">Technology: {recommendation.solution.technology || 'Not recorded'} · Outcome: {recommendation.solution.expectedOutcome || 'Not recorded'}</p><div className="mt-3 flex flex-wrap gap-2">{recommendation.relevantAspects.map((aspect) => <Badge key={aspect} tone="blue">{aspect}</Badge>)}</div><button onClick={() => setSelectedRecommendation(recommendation.solution)} className="mt-4 rounded-md bg-[#06245C] px-3 py-2 text-xs font-bold text-white">View Solution</button></article>)}</div>}</div></div>}
     {selectedRecommendation && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4"><div role="dialog" aria-modal="true" className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between gap-4"><div><p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Verified Solution Library item</p><h2 className="mt-1 text-xl font-bold text-slate-950">{selectedRecommendation.solutionTitle || selectedRecommendation.title}</h2></div><button onClick={() => setSelectedRecommendation(null)} aria-label="Close solution details"><X className="size-5 text-slate-500" /></button></div><div className="mt-5 space-y-3 text-sm text-slate-700"><p><strong>Original problem:</strong> {selectedRecommendation.challenge?.title || 'Not available'}</p><p><strong>Problem description:</strong> {selectedRecommendation.challenge?.description || 'Not available'}</p><p><strong>Solution approach:</strong> {selectedRecommendation.solutionApproach || 'Not recorded'}</p><p><strong>Technology used:</strong> {selectedRecommendation.technology || 'Not recorded'}</p><p><strong>Implementation details:</strong> {selectedRecommendation.implementationDetails || 'Not recorded'}</p><p><strong>Result/outcome:</strong> {selectedRecommendation.expectedOutcome || 'Not recorded'}</p><p><strong>Verification status:</strong> Government verified completed solution</p></div></div></div>}
     {mentorTarget && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4"><div role="dialog" aria-modal="true" className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"><div className="flex justify-between"><div><p className="text-[11px] font-bold uppercase tracking-wider text-red-600">Faculty mentor</p><h2 className="mt-1 text-lg font-bold text-slate-950">Select Mentor</h2><p className="mt-1 text-sm text-slate-500">{mentorTarget.department} · {mentorTarget.title}</p></div><button onClick={() => setMentorTarget(null)} aria-label="Close mentor selection"><X className="size-5 text-slate-500" /></button></div><div className="mt-5 space-y-2">{mentors.map((mentor) => <button key={mentor._id} disabled={busy} onClick={() => void selectMentor(mentor._id || '')} className="flex w-full items-start justify-between rounded-xl border border-slate-200 p-3 text-left hover:border-blue-500 disabled:opacity-50"><span><span className="block font-bold text-slate-800">{mentor.name}</span><span className="block text-xs text-slate-500">Faculty · {mentor.universityDepartment} · {mentor.institution}</span></span></button>)}{!mentors.length && <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">No eligible faculty mentors are available in this department.</p>}</div></div></div>}
     {createTarget && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4"><div role="dialog" aria-modal="true" className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"><div className="flex justify-between"><div><p className="text-[11px] font-bold uppercase tracking-wider text-red-600">Funding Approved</p><h2 className="mt-1 text-lg font-bold text-slate-950">Create Project</h2></div><button onClick={() => setCreateTarget(null)} aria-label="Close project form"><X className="size-5 text-slate-500" /></button></div><p className="mt-2 text-sm text-slate-500">{createTarget.title} · Mentor: {createTarget.departmentMentor?.name}</p><div className="mt-5 space-y-3">{([['title', 'Project title'], ['objective', 'Project objective'], ['description', 'Project description']] as const).map(([key, label]) => <label key={key} className="block text-sm font-semibold text-slate-700">{label}<textarea value={projectForm[key]} onChange={(event) => setProjectForm((current) => ({ ...current, [key]: event.target.value }))} rows={key === 'title' ? 1 : 3} className="mt-1 w-full rounded-lg border border-slate-200 p-3 text-sm font-normal" /></label>)}<div><p className="text-sm font-bold text-slate-700">Students</p>{eligibleStudents.map((member) => <label key={member._id} className="mt-2 flex items-center gap-2 text-sm"><input type="checkbox" checked={studentSelection.includes(member._id || '')} onChange={(event) => setStudentSelection((current) => event.target.checked ? [...current, member._id || ''] : current.filter((id) => id !== member._id))} />{member.name} <span className="text-xs text-slate-500">· {member.universityDepartment || 'University student'}</span></label>)}</div><div><p className="text-sm font-bold text-slate-700">Researchers</p>{eligibleResearchers.map((member) => <label key={member._id} className="mt-2 flex items-center gap-2 text-sm"><input type="checkbox" checked={researcherSelection.includes(member._id || '')} onChange={(event) => setResearcherSelection((current) => event.target.checked ? [...current, member._id || ''] : current.filter((id) => id !== member._id))} />{member.name} <span className="text-xs text-slate-500">· Researcher</span></label>)}</div>{(!studentSelection.length || !researcherSelection.length) && <p className="text-sm font-semibold text-red-700">Select at least one Student and one Researcher to create this project.</p>}</div><button disabled={busy || !projectForm.title || !projectForm.objective || !projectForm.description || !studentSelection.length || !researcherSelection.length} onClick={() => void saveProject()} className="mt-5 w-full rounded-lg bg-[#06245C] px-4 py-3 text-sm font-bold text-white disabled:opacity-50">{busy ? 'Creating...' : 'Create Project'}</button></div></div>}
-    {progressProject && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4"><div role="dialog" aria-modal="true" className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"><div className="flex justify-between"><h2 className="text-lg font-bold text-slate-950">Update Progress</h2><button onClick={() => setProgressProject(null)} aria-label="Close progress form"><X className="size-5 text-slate-500" /></button></div><div className="mt-5 space-y-3"><label className="block text-sm font-semibold text-slate-700">Progress percentage<input type="number" min={0} max={100} step={1} value={progressPercentage} onChange={(event) => setProgressPercentage(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 p-3 text-sm" /></label><label className="block text-sm font-semibold text-slate-700">Current stage<select value={progressForm.currentStage} onChange={(event) => { const currentStage = event.target.value; setProgressForm((current) => ({ ...current, currentStage, progressDescription: current.progressDescriptions[currentStage] || '', })) }} className="mt-1 w-full rounded-lg border border-slate-200 p-3 text-sm">{stageLabels.map((stage, index) => { const currentIndex = stageLabels.indexOf(progressProject.currentStage || 'proposed'); return <option key={stage} value={stage} disabled={index < currentIndex || index > currentIndex + 1}>{stage}</option> })}</select></label><label className="block text-sm font-semibold text-slate-700">Process description<textarea placeholder="Describe the work completed in this stage..." value={progressForm.progressDescription} onChange={(event) => setProgressForm((current) => ({ ...current, progressDescription: event.target.value, progressDescriptions: { ...current.progressDescriptions, [current.currentStage]: event.target.value } }))} rows={5} className="mt-1 w-full rounded-lg border border-slate-200 p-3 text-sm" /></label><p className={`text-xs ${progressDescriptionLength < 20 ? 'text-amber-700' : 'text-slate-500'}`}>Minimum 20 characters required.</p>{(!progressProject.teamMembers?.some((member) => member.accountType === 'student') || !progressProject.teamMembers?.some((member) => member.accountType === 'researcher')) && <p className="text-sm font-semibold text-red-700">Select at least one Student and one Researcher before updating project progress.</p>}<p className="text-sm text-red-700">{progressDescriptionLength < 20 || !isCompletedDescriptionValid ? 'Please describe the work completed for the selected stage.' : ''}</p><p className="text-sm text-red-700">{progressForm.currentStage === 'completed' && parsedProgressPercentage !== 100 ? 'Completed stage requires 100% progress.' : parsedProgressPercentage === 100 && progressForm.currentStage !== 'completed' ? '100% progress requires the Completed stage.' : ''}</p></div><button disabled={busy || !progressProject.teamMembers?.some((member) => member.accountType === 'student') || !progressProject.teamMembers?.some((member) => member.accountType === 'researcher') || !progressForm.currentStage || !isProgressPercentageValid || parsedProgressPercentage === 100 && progressForm.currentStage !== 'completed' || progressForm.currentStage === 'completed' && parsedProgressPercentage !== 100 || progressDescriptionLength < 20 || !isCompletedDescriptionValid} onClick={() => void saveProgress()} className="mt-5 w-full rounded-lg bg-[#06245C] px-4 py-3 text-sm font-bold text-white disabled:opacity-50">{busy ? 'Updating...' : 'Update Progress'}</button></div></div>}
-    {teamProject && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4"><div role="dialog" aria-modal="true" className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"><div className="flex justify-between"><div><p className="text-[11px] font-bold uppercase tracking-wider text-red-600">Assigned mentor</p><h2 className="mt-1 text-lg font-bold text-slate-950">Create project team</h2></div><button onClick={() => setTeamProject(null)} aria-label="Close team editor"><X className="size-5 text-slate-500" /></button></div><p className="mt-2 text-sm text-slate-500">{teamProject.title}</p><div className="mt-5 max-h-72 space-y-2 overflow-y-auto">{eligibleMembers.map((member) => <label key={member._id} className="flex items-center gap-3 rounded-lg border border-slate-100 p-3"><input type="checkbox" checked={teamSelection.includes(member._id || '')} onChange={(event) => setTeamSelection((current) => event.target.checked ? [...new Set([...current, member._id].filter(Boolean) as string[])] : current.filter((id) => id !== member._id))} /><span><span className="block text-sm font-semibold text-slate-800">{member.name}</span><span className="block text-xs text-slate-500">{member.accountType} · {member.email}</span></span></label>)}</div><button disabled={busy} onClick={() => void saveTeam()} className="mt-5 w-full rounded-lg bg-[#06245C] px-4 py-3 text-sm font-bold text-white disabled:opacity-50">{busy ? 'Saving...' : 'Create Project Team'}</button></div></div>}
+        {progressProject && (() => {
+      const currentStageIndex = stageLabels.indexOf(progressProject.currentStage || 'proposed')
+      const nextStage = stageLabels[currentStageIndex + 1]
+      const isCompleted = !nextStage
+      return <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4"><div role="dialog" aria-modal="true" className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"><div className="flex justify-between"><div><h2 className="text-lg font-bold text-slate-950">Update Progress</h2><p className="mt-1 text-sm text-slate-500">Current stage: {progressProject.currentStage || 'proposed'}</p></div><button onClick={() => setProgressProject(null)} aria-label="Close progress form"><X className="size-5 text-slate-500" /></button></div>{isCompleted ? <p className="mt-6 rounded-lg bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">Project Completed</p> : <><label className="mt-5 block text-sm font-semibold text-slate-700">Current stage<select value={progressForm.currentStage} onChange={(event) => setProgressForm({ currentStage: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 p-3 text-sm"><option value={nextStage}>{nextStage}</option></select></label><button disabled={busy} onClick={() => void saveProgress()} className="mt-5 w-full rounded-lg bg-[#06245C] px-4 py-3 text-sm font-bold text-white disabled:opacity-50">{busy ? 'Updating...' : 'Update Progress'}</button></>}</div></div>
+    })()}{teamProject && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4"><div role="dialog" aria-modal="true" className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"><div className="flex justify-between"><div><p className="text-[11px] font-bold uppercase tracking-wider text-red-600">Assigned mentor</p><h2 className="mt-1 text-lg font-bold text-slate-950">Create project team</h2></div><button onClick={() => setTeamProject(null)} aria-label="Close team editor"><X className="size-5 text-slate-500" /></button></div><p className="mt-2 text-sm text-slate-500">{teamProject.title}</p><div className="mt-5 max-h-72 space-y-2 overflow-y-auto">{eligibleMembers.map((member) => <label key={member._id} className="flex items-center gap-3 rounded-lg border border-slate-100 p-3"><input type="checkbox" checked={teamSelection.includes(member._id || '')} onChange={(event) => setTeamSelection((current) => event.target.checked ? [...new Set([...current, member._id].filter(Boolean) as string[])] : current.filter((id) => id !== member._id))} /><span><span className="block text-sm font-semibold text-slate-800">{member.name}</span><span className="block text-xs text-slate-500">{member.accountType} · {member.email}</span></span></label>)}</div><button disabled={busy} onClick={() => void saveTeam()} className="mt-5 w-full rounded-lg bg-[#06245C] px-4 py-3 text-sm font-bold text-white disabled:opacity-50">{busy ? 'Saving...' : 'Create Project Team'}</button></div></div>}
     {solutionProject && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4"><div role="dialog" aria-modal="true" className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"><div className="flex justify-between"><div><p className="text-[11px] font-bold uppercase tracking-wider text-red-600">Solution development</p><h2 className="mt-1 text-lg font-bold text-slate-950">{solutionProject.title}</h2></div><button onClick={() => setSolutionProject(null)} aria-label="Close solution editor"><X className="size-5 text-slate-500" /></button></div><div className="mt-5 grid gap-3">{([['solutionTitle', 'Solution title'], ['solutionDescription', 'Proposed solution'], ['solutionApproach', 'Solution approach'], ['technology', 'Technology / methodology'], ['implementationDetails', 'Implementation details'], ['expectedOutcome', 'Expected outcome']] as const).map(([key, label]) => <label key={key} className="text-sm font-semibold text-slate-700">{label}<textarea value={solution[key]} onChange={(event) => setSolution((current) => ({ ...current, [key]: event.target.value }))} rows={key === 'solutionTitle' ? 2 : 3} className="mt-1 w-full rounded-lg border border-slate-200 p-3 text-sm font-normal" /></label>)}</div><div className="mt-5 flex flex-wrap gap-2"><button disabled={busy} onClick={() => void saveSolution('draft')} className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-700">Save draft</button><button disabled={busy} onClick={() => void saveSolution('submitted')} className="rounded-lg bg-[#06245C] px-4 py-2.5 text-sm font-bold text-white">Submit solution</button></div></div></div>}
   </div></main>
 }

@@ -128,12 +128,6 @@ export const createProject = async (req, res, next) => {
         message: `Project type must be one of: ${validProjectTypes.join(', ')}`
       });
     }
-        const stageOrder = ['proposed', 'prototype', 'testing', 'deployed', 'completed'];
-        const currentIndex = stageOrder.indexOf(project.currentStage || 'proposed');
-        const nextIndex = stageOrder.indexOf(currentStage);
-        if (nextIndex < currentIndex || nextIndex > currentIndex + 1) {
-          return res.status(400).json({ success: false, message: 'Project stages must be updated sequentially' });
-        }
 
     // Validate timeline
     if (!timeline.startDate || !timeline.expectedCompletionDate) {
@@ -172,8 +166,16 @@ export const createProject = async (req, res, next) => {
       });
     }
 
+    const existingProject = await Project.findOne({ challenge: challengeDoc._id }).select('_id');
+    if (existingProject) {
+      return res.status(409).json({
+        success: false,
+        message: 'This challenge already has a project.'
+      });
+    }
+
     // Create project object
-    if (isAssignedDepartmentMentor && universityDepartment !== challengeDoc.department) {
+    if (universityDepartment !== challengeDoc.department) {
       return res.status(400).json({ success: false, message: 'Project department must match the assigned challenge department' });
     }
     const projectUniversity = challengeDoc.assignedUniversity;
@@ -563,45 +565,22 @@ export const updateProjectStatus = async (req, res, next) => {
 // @access  Private - Project-owning university only
 export const updateProjectProgress = async (req, res, next) => {
   try {
-    const { progressPercentage, currentStage, description } = req.body;
-    const percentage = typeof progressPercentage === 'number'
-      ? progressPercentage
-      : typeof progressPercentage === 'string' && /^\d+$/.test(progressPercentage)
-        ? Number(progressPercentage)
-        : NaN;
-    const validStages = ['proposed', 'prototype', 'testing', 'deployed', 'completed'];
-    const trimmedDescription = typeof description === 'string' ? description.trim() : '';
-    if (progressPercentage === '' || progressPercentage === null || progressPercentage === undefined
-      || !Number.isInteger(percentage) || percentage < 0 || percentage > 100 || !validStages.includes(currentStage)) {
-      return res.status(400).json({ success: false, message: 'Progress percentage must be an integer between 0 and 100' });
-    }
-    if (percentage === 100 && currentStage !== 'completed') {
-      return res.status(400).json({ success: false, message: '100% progress requires the Completed stage' });
-    }
-    if (currentStage === 'completed' && percentage !== 100) {
-      return res.status(400).json({ success: false, message: 'Completed stage requires 100% progress.' });
-    }
-    const descriptionWords = trimmedDescription.match(/[a-z0-9]+/gi) || [];
-    const hasMeaningfulDescription = descriptionWords.length >= 3
-      && new Set(descriptionWords.map((word) => word.toLowerCase())).size >= 3
-      && !/^(done|ok|completed|g+)([\s.!]*)$/i.test(trimmedDescription);
-    if (trimmedDescription.length < 20 || !hasMeaningfulDescription) {
-      return res.status(400).json({ success: false, message: 'Please describe the work completed for the selected stage. Minimum 20 characters required.' });
-    }
-    if (currentStage === 'completed' && !/\b(complet|implement|result|outcome|solution|deplo|test)\w*/i.test(trimmedDescription)) {
-      return res.status(400).json({ success: false, message: 'Completed progress must describe what was completed, the implemented solution, and the result.' });
+    const { currentStage } = req.body;
+    const stageProgress = {
+      proposed: 0,
+      prototype: 25,
+      testing: 50,
+      deployed: 75,
+      completed: 100
+    };
+    if (!Object.prototype.hasOwnProperty.call(stageProgress, currentStage)) {
+      return res.status(400).json({ success: false, message: 'Current stage must be one of: proposed, prototype, testing, deployed, completed' });
     }
     const project = await Project.findById(req.params.id);
     if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
     const challenge = await Challenge.findById(project.challenge).select('title district departmentMentor cancelledAt industryFundingStatus industryFundedBy');
     const user = await User.findById(req.user.id).select('role institution universityDepartment universityRole');
     const university = await User.findById(project.university).select('institution');
-    const teamMembers = await User.find({ _id: { $in: project.teamMembers } }).select('accountType');
-    const hasStudent = teamMembers.some((member) => member.accountType === 'student');
-    const hasResearcher = teamMembers.some((member) => member.accountType === 'researcher');
-    if (!hasStudent || !hasResearcher) {
-      return res.status(400).json({ success: false, message: 'Select at least one Student and one Researcher before updating project progress.' });
-    }
     const isMentor = challenge?.departmentMentor?.toString() === req.user.id && project.facultyMentor?.toString() === req.user.id;
     const isTeamMember = project.teamMembers.some((member) => member.toString() === req.user.id);
     const isOwner = project.university.toString() === req.user.id;
@@ -618,28 +597,31 @@ export const updateProjectProgress = async (req, res, next) => {
     const stageOrder = ['proposed', 'prototype', 'testing', 'deployed', 'completed'];
     const currentIndex = stageOrder.indexOf(project.currentStage || 'proposed');
     const nextIndex = stageOrder.indexOf(currentStage);
-    if (nextIndex < currentIndex || nextIndex > currentIndex + 1) {
-      return res.status(400).json({ success: false, message: 'Project stages must be updated sequentially' });
+    if (nextIndex !== currentIndex + 1) {
+      const nextStage = stageOrder[currentIndex + 1];
+      return res.status(400).json({
+        success: false,
+        message: nextStage
+          ? `Invalid stage transition. Project must move from ${project.currentStage || 'proposed'} to ${nextStage} first.`
+          : 'Project is already completed and has no next stage.'
+      });
     }
     if (!project.progressUpdates) project.progressUpdates = [];
     const existingUpdate = project.progressUpdates.find((update) => update.stage === currentStage);
     if (existingUpdate) {
-      existingUpdate.percentage = percentage;
-      existingUpdate.description = trimmedDescription;
+      existingUpdate.percentage = stageProgress[currentStage];
       existingUpdate.updatedBy = req.user.id;
       existingUpdate.updatedAt = new Date();
     } else {
       project.progressUpdates.push({
         stage: currentStage,
-        percentage,
-        description: trimmedDescription,
+        percentage: stageProgress[currentStage],
         updatedBy: req.user.id,
         updatedAt: new Date()
       });
     }
-    project.progressPercentage = percentage;
+    project.progressPercentage = stageProgress[currentStage];
     project.currentStage = currentStage;
-    project.completedWork = trimmedDescription;
     project.status = currentStage;
     await project.save();
     if (currentStage === 'completed') {
@@ -673,8 +655,8 @@ export const updateProjectProgress = async (req, res, next) => {
         message: currentStage === 'completed'
           ? `Project "${project.title}" has been completed and is awaiting Government verification.`
           : recipientRole === 'industry'
-            ? `Project "${project.title}" is now ${percentage}% complete and currently in ${currentStage}.`
-            : `Project "${project.title}" is now at ${percentage}% — ${currentStage}.`,
+            ? `Project "${project.title}" is now ${stageProgress[currentStage]}% complete and currently in ${currentStage}.`
+            : `Project "${project.title}" is now at ${stageProgress[currentStage]}% — ${currentStage}.`,
         relatedEntityType: 'project',
         relatedEntityId: project._id,
         actor: req.user.id,
@@ -835,6 +817,16 @@ export const updateProjectSolution = async (req, res, next) => {
       if (!['draft', 'submitted'].includes(req.body.solutionStatus)) return res.status(400).json({ success: false, message: 'Invalid solution status' });
       if (req.body.solutionStatus === 'submitted' && !isMentor) return res.status(403).json({ success: false, message: 'Only the assigned mentor can submit a solution' });
       update.solutionStatus = req.body.solutionStatus;
+    }
+    if (update.solutionStatus === 'submitted') {
+      const requiredFields = ['solutionTitle', 'solutionDescription', 'solutionApproach', 'expectedOutcome'];
+      const missingField = requiredFields.find((field) => !update[field] && !project[field]);
+      if (missingField) {
+        return res.status(400).json({
+          success: false,
+          message: `${missingField} is required before submitting a solution`
+        });
+      }
     }
     const updatedProject = await Project.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true })
       .populate([

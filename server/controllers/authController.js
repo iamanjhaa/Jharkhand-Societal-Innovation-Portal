@@ -193,7 +193,7 @@ export const loginUser = async (req, res, next) => {
     const { email, password, institution, coordinatorCode } = req.body;
 
     // Validation
-    if (!email || !password) {
+    if (typeof email !== 'string' || typeof password !== 'string' || !email.trim() || !password) {
       return res.status(400).json({
         success: false,
         message: 'Please provide email and password'
@@ -201,7 +201,7 @@ export const loginUser = async (req, res, next) => {
     }
 
     // Find user and include password field
-    const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
+    const user = await User.findOne({ email: email.trim().toLowerCase() }).select('+password');
 
     if (!user) {
       return res.status(401).json({

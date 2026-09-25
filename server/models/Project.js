@@ -82,7 +82,7 @@ const projectSchema = new mongoose.Schema(
           required: true
         },
         percentage: { type: Number, min: 0, max: 100, required: true },
-        description: { type: String, trim: true, required: true },
+        description: { type: String, trim: true, default: '' },
         updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
         updatedAt: { type: Date, default: Date.now }
       }

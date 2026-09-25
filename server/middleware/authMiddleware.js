@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import User from '../models/User.js';
 
 export const authMiddleware = async (req, res, next) => {
   try {
@@ -25,11 +26,16 @@ export const authMiddleware = async (req, res, next) => {
     // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // Attach user info to request
-    req.user = {
-      id: decoded.id,
-      role: decoded.role
-    };
+    const user = await User.findById(decoded.id);
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authenticated user no longer exists'
+      });
+    }
+
+    // The database record is authoritative for identity and authorization.
+    req.user = user;
 
     next();
   } catch (error) {

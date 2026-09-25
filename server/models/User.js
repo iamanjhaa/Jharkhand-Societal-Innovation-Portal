@@ -160,6 +160,10 @@ userSchema.methods.toJSON = function() {
   return user;
 };
 
+userSchema.index({ role: 1, institution: 1, accountType: 1 });
+userSchema.index({ role: 1, institution: 1, universityDepartment: 1 });
+userSchema.index({ role: 1, governmentDistrict: 1 });
+
 const User = mongoose.model('User', userSchema);
 
 export default User;

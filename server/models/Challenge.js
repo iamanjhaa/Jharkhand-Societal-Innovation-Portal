@@ -326,6 +326,9 @@ const challengeSchema = new mongoose.Schema(
 
 // Index for common queries
 challengeSchema.index({ district: 1, category: 1 });
+challengeSchema.index({ district: 1, status: 1, createdAt: -1 });
+challengeSchema.index({ assignedUniversity: 1, status: 1, createdAt: -1 });
+challengeSchema.index({ department: 1, status: 1, createdAt: -1 });
 challengeSchema.index({ status: 1 });
 challengeSchema.index({ submittedBy: 1 });
 challengeSchema.index({ createdAt: -1 });

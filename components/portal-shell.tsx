@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Bell,
   BriefcaseBusiness,
@@ -30,9 +30,9 @@ import {
   detectUrgency,
   getChallenges,
   getCurrentUser,
+  getCurrentUserFromStorage,
   clearAuthToken,
   getAuthToken,
-  getCurrentUserFromStorage,
   getMyRewards,
   redeemMyReward,
   saveCurrentUser,
@@ -45,6 +45,7 @@ import {
   type PortalNotification,
   type PortalSearchResult,
 } from "@/lib/api";
+import { resolveDashboardView } from "@/lib/dashboard-routing";
 import { cn } from "@/lib/utils";
 import { UNIVERSITY_DEPARTMENTS } from "@/lib/university-departments";
 import { UNIVERSITY_CLUBS } from "@/lib/university-clubs";
@@ -300,6 +301,7 @@ function Topbar({
   setOpen,
   userName,
   isCitizen,
+  enabled,
   rewardRefreshToken,
   onLogout,
   onNavigate,
@@ -309,6 +311,7 @@ function Topbar({
   setOpen: (v: boolean) => void;
   userName?: string;
   isCitizen: boolean;
+  enabled: boolean;
   rewardRefreshToken: number;
   onLogout: () => void;
   onNavigate: (href: string) => void;
@@ -324,9 +327,14 @@ function Topbar({
   const [searchError, setSearchError] = useState("");
   const [notifications, setNotifications] = useState<PortalNotification[]>([]);
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  const notificationEffectKey = useRef(false);
+  const rewardEffectKey = useRef<string | null>(null);
 
   useEffect(() => {
     if (!isCitizen) return;
+    const requestKey = `${isCitizen}:${rewardRefreshToken}`;
+    if (rewardEffectKey.current === requestKey) return;
+    rewardEffectKey.current = requestKey;
     let active = true;
     setLoadingRewards(true);
     void getMyRewards().then((response) => {
@@ -344,6 +352,9 @@ function Topbar({
   }, [isCitizen, rewardRefreshToken]);
 
   useEffect(() => {
+    if (!enabled) return;
+    if (notificationEffectKey.current) return;
+    notificationEffectKey.current = true;
     let active = true;
     void getNotifications().then((response) => {
       if (active && response.success) {
@@ -365,7 +376,7 @@ function Topbar({
       active = false;
       window.clearInterval(interval);
     };
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
     if (searchQuery.trim().length < 2) {
@@ -374,16 +385,21 @@ function Topbar({
       setSearchError("");
       return;
     }
+    const controller = new AbortController();
     const timer = window.setTimeout(() => {
       setSearching(true);
       setSearchError("");
-      void searchPortal(searchQuery.trim()).then((response) => {
+      void searchPortal(searchQuery.trim(), controller.signal).then((response) => {
+        if (controller.signal.aborted) return;
         if (response.success) setSearchResults(response.data || []);
         else setSearchError("Search is temporarily unavailable.");
         setSearching(false);
       });
     }, 300);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
   }, [searchQuery]);
 
   const unreadCount = unreadNotificationCount;
@@ -1074,8 +1090,7 @@ function Submit({ setView }: { setView: (v: View) => void }) {
   );
 }
 
-function Dashboard({ setView, onRewardsChanged }: { setView: (v: View) => void; onRewardsChanged: () => void }) {
-  const currentUser = getCurrentUserFromStorage();
+function Dashboard({ currentUser, setView, onRewardsChanged }: { currentUser: Record<string, any> | null; setView: (v: View) => void; onRewardsChanged: () => void }) {
   const [submittedCount, setSubmittedCount] = useState<number | null>(null);
   const [submittedChallenges, setSubmittedChallenges] = useState<Array<{
     _id: string;
@@ -1086,8 +1101,11 @@ function Dashboard({ setView, onRewardsChanged }: { setView: (v: View) => void; 
   const [rewards, setRewards] = useState<Awaited<ReturnType<typeof getMyRewards>>['data']>(undefined);
   const [rewardMessage, setRewardMessage] = useState('');
   const [redeeming, setRedeeming] = useState(false);
+  const dashboardLoadStarted = useRef(false);
 
   useEffect(() => {
+    if (dashboardLoadStarted.current) return;
+    dashboardLoadStarted.current = true;
     async function loadSubmittedChallenges() {
       if (!currentUser?._id) {
         setSubmittedCount(0);
@@ -1202,14 +1220,22 @@ function Dashboard({ setView, onRewardsChanged }: { setView: (v: View) => void; 
 
 export default function PortalShell() {
   const router = useRouter();
-  const [view, setView] = useState<View>("home");
-  const [role, setRole] = useState<Role>("Citizen");
-  const [authenticated, setAuthenticated] = useState(false);
-  const [currentUser, setCurrentUser] = useState<Record<string, any> | null>(null);
+  const initialUser = getCurrentUserFromStorage();
+  const initialDashboard = resolveDashboardView(initialUser?.role, initialUser?.accountType, initialUser?.universityRole);
+  const [view, setView] = useState<View>(initialDashboard || "home");
+  const [role, setRole] = useState<Role>(
+    initialDashboard === "government" ? "Government"
+      : initialDashboard === "university" ? "University"
+        : initialDashboard === "industry" ? "Industry"
+          : "Citizen",
+  );
+  const [authenticated, setAuthenticated] = useState(Boolean(getAuthToken() && initialDashboard));
+  const [currentUser, setCurrentUser] = useState<Record<string, any> | null>(initialUser);
   const [studentProfileRequired, setStudentProfileRequired] = useState(false);
   const [open, setOpen] = useState(true);
   const [governmentAction, setGovernmentAction] = useState('');
   const [rewardRefreshToken, setRewardRefreshToken] = useState(0);
+  const restoreSessionStarted = useRef(false);
   const [coordinatorSection, setCoordinatorSection] = useState<CoordinatorSection>("dashboard");
   const [departmentSection, setDepartmentSection] = useState<DepartmentSection>("problems");
   const isCoordinator = role === "University" && currentUser?.universityRole === "innovation_coordinator";
@@ -1224,6 +1250,16 @@ export default function PortalShell() {
       router.replace("/login");
       return;
     }
+    const dashboardView = resolveDashboardView(
+      currentUser?.role,
+      currentUser?.accountType,
+      currentUser?.universityRole,
+    );
+    if (["citizen", "government", "university", "industry"].includes(nextView)
+      && nextView !== dashboardView) {
+      setView(dashboardView || "home");
+      return;
+    }
     if ((nextView === "submit" || nextView === "challenges") && role !== "Citizen") {
       setView(role === "Government" ? "government" : role === "University" ? "university" : role === "Industry" ? "industry" : "citizen");
       return;
@@ -1232,7 +1268,12 @@ export default function PortalShell() {
   };
   useEffect(() => {
     async function restoreSession() {
+      if (restoreSessionStarted.current) return;
+      restoreSessionStarted.current = true;
       if (!getAuthToken()) return;
+      if (sessionStorage.getItem('auth_session_fresh') === '1') {
+        return;
+      }
       const response = await getCurrentUser();
       if (!response.success || !response.data?.user) {
         clearAuthToken();
@@ -1245,7 +1286,14 @@ export default function PortalShell() {
         router.replace("/login");
         return;
       }
-      const nextRole = userRole === "government" ? "Government" : userRole === "university" ? "University" : userRole === "industry" ? "Industry" : "Citizen";
+      const dashboardView = resolveDashboardView(userRole, response.data.user.accountType, response.data.user.universityRole);
+      if (!dashboardView) {
+        clearAuthToken();
+        router.replace("/login");
+        return;
+      }
+      const nextRole = dashboardView === "government" ? "Government" : dashboardView === "university" ? "University" : dashboardView === "industry" ? "Industry" : "Citizen";
+      saveCurrentUser(response.data.user);
       setCurrentUser(response.data.user);
       setStudentProfileRequired(
         userRole === "university"
@@ -1254,7 +1302,7 @@ export default function PortalShell() {
       );
       setRole(nextRole);
       setAuthenticated(true);
-      setView(nextRole === "Government" ? "government" : nextRole === "University" ? "university" : nextRole === "Industry" ? "industry" : "citizen");
+      setView(dashboardView);
       if (nextRole === "University" && response.data.user.universityRole === "innovation_coordinator") setCoordinatorSection("dashboard");
     }
     void restoreSession();
@@ -1344,6 +1392,7 @@ export default function PortalShell() {
           open={open}
           setOpen={setOpen}
           isCitizen={role === "Citizen"}
+          enabled={authenticated}
           rewardRefreshToken={rewardRefreshToken}
           onLogout={handleLogout}
           onNavigate={(href) => router.push(href)}
@@ -1363,7 +1412,7 @@ export default function PortalShell() {
         ) : view === "industry" ? (
           <IndustryDashboard />
         ) : (
-          <Dashboard setView={guardedSetView} onRewardsChanged={() => setRewardRefreshToken((value) => value + 1)} />
+          <Dashboard currentUser={currentUser} setView={guardedSetView} onRewardsChanged={() => setRewardRefreshToken((value) => value + 1)} />
         )}
         {role === "Citizen" && <SahayakChat onNavigate={guardedSetView} />}
       </div>
