@@ -20,6 +20,7 @@ import locationRoutes from './routes/locationRoutes.js';
 import rewardRoutes from './routes/rewardRoutes.js';
 import searchRoutes from './routes/searchRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
+import emergencyRoutes from './routes/emergencyRoutes.js';
 
 // Load environment variables
 const currentFilePath = fileURLToPath(import.meta.url);
@@ -62,6 +63,7 @@ app.use('/api/location', locationRoutes);
 app.use('/api/rewards', rewardRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/emergency', emergencyRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/industry', industryRoutes);
 app.use('/api/clubs', clubRoutes);

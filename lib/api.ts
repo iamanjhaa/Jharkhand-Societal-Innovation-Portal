@@ -248,6 +248,72 @@ export async function chatWithSahayak(problem: string, language: 'en' | 'hi' = '
   });
 }
 
+export async function transcribeEmergencyAudio(audio: Blob) {
+  const form = new FormData();
+  form.append('audio', audio, 'emergency.webm');
+  return apiCall<{ transcript: string }>('/api/sahayak/transcribe', { method: 'POST', body: form });
+}
+
+export type EmergencyHelper = {
+  _id: string;
+  name: string;
+  phone: string;
+  priority: number;
+  enabled: boolean;
+  alertEnabled: boolean;
+};
+
+export type EmergencyRequest = {
+  _id: string;
+  type: 'ACCIDENT' | 'MEDICAL_EMERGENCY' | 'FIRE' | 'FLOOD_DISASTER' | 'GENERAL_EMERGENCY' | 'CALL_EMERGENCY_HELPER' | 'NORMAL';
+  command: string;
+  status: 'TRIGGERED' | 'ALERTING' | 'HELPER_CONTACTED' | 'HELPER_RESPONDED' | 'RESOLVED' | 'CANCELLED' | 'FAILED';
+  latitude: number | null;
+  longitude: number | null;
+  locationAccuracy: number | null;
+  triggeredAt: string;
+  createdAt: string;
+};
+
+export async function getEmergencySettings() {
+  return apiCall<{ enabled: boolean; helpers: EmergencyHelper[] }>('/api/emergency/helpers', { method: 'GET' });
+}
+
+export async function setEmergencyVoiceMode(enabled: boolean) {
+  return apiCall<{ enabled: boolean }>('/api/emergency/mode', {
+    method: 'PATCH',
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export async function createEmergencyHelper(data: { name: string; phone: string }) {
+  return apiCall<EmergencyHelper>('/api/emergency/helpers', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateEmergencyHelper(id: string, data: Partial<Pick<EmergencyHelper, 'name' | 'phone' | 'priority' | 'enabled' | 'alertEnabled'>>) {
+  return apiCall<EmergencyHelper>(`/api/emergency/helpers/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteEmergencyHelper(id: string) {
+  return apiCall(`/api/emergency/helpers/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export async function getEmergencyRequests() {
+  return apiCall<EmergencyRequest[]>('/api/emergency/requests/me', { method: 'GET' });
+}
+
+export async function cancelEmergencyRequest(id: string) {
+  return apiCall<EmergencyRequest>(`/api/emergency/requests/${encodeURIComponent(id)}/cancel`, {
+    method: 'PATCH',
+  });
+}
+
 export async function detectUrgency(details: {
   title: string;
   description: string;

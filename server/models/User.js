@@ -60,6 +60,10 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: function() { return this.role === 'citizen'; }
     },
+    emergencyVoiceModeEnabled: {
+      type: Boolean,
+      default: false,
+    },
 
     // Government-specific fields
     department: {

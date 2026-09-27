@@ -5,6 +5,7 @@ import { Bot, ChevronDown, Loader2, Send, Sparkles, X } from "lucide-react";
 import { chatWithSahayak } from "@/lib/api";
 import { emergencyHelplines, getEmergencyGuidance } from "@/lib/emergency-helplines";
 import { getOfflineSahayakResponse } from "@/lib/offline-sahayak";
+import EmergencyVoiceMode from "@/components/emergency-voice-mode";
 
 type SahayakResponse = {
   message?: string;
@@ -222,6 +223,7 @@ export default function SahayakChat({ onNavigate }: { onNavigate: (view: View) =
                 ))}
               </div>
             ) : null}
+            <EmergencyVoiceMode />
             <form onSubmit={sendMessage} className="flex items-end gap-2">
               <label className="sr-only" htmlFor="sahayak-input">Message Sahayak</label>
               <textarea id="sahayak-input" value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage(); } }} rows={1} disabled={sending} placeholder="Describe your problem..." className="min-h-10 flex-1 resize-none rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/15 disabled:bg-slate-100" />
