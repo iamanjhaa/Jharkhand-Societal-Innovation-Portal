@@ -54,6 +54,7 @@ import GovernmentDashboard from "@/components/government-dashboard";
 import UniversityDashboard from "@/components/university-dashboard";
 import UniversityCoordinatorDashboard, { type CoordinatorSection } from "@/components/university-coordinator-dashboard";
 import DepartmentDashboard, { type DepartmentSection } from "@/components/department-dashboard";
+import SankalpMentorDashboard from "@/components/sankalp-mentor-dashboard";
 import IndustryDashboard from "@/components/industry-dashboard";
 import SahayakChat, { OfflineHomepageSahayak } from "@/components/sahayak-chat";
 import DashboardShell from "@/components/dashboard-shell";
@@ -612,6 +613,7 @@ function UniversityStudentProfileSetup({
   const [department, setDepartment] = useState("");
   const [academicRole, setAcademicRole] = useState<"student" | "researcher">("student");
   const [primaryClub, setPrimaryClub] = useState("");
+  const [sankalpProfile, setSankalpProfile] = useState({ studentId: "", course: "", yearSemester: "", skillsInterests: "" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [confirmation, setConfirmation] = useState("");
@@ -619,9 +621,19 @@ function UniversityStudentProfileSetup({
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!department || !primaryClub || loading) return;
+    if (academicRole === "student" && ["NCC", "NSS"].includes(primaryClub)
+      && (!sankalpProfile.studentId.trim() || !sankalpProfile.course.trim() || !sankalpProfile.yearSemester.trim())) {
+      setError("Student ID, course, and year/semester are required for Sankalp Club membership.");
+      return;
+    }
     setError("");
     setLoading(true);
-    const response = await updateUniversityProfile(department, academicRole, primaryClub);
+    const response = await updateUniversityProfile(
+      department,
+      academicRole,
+      primaryClub,
+      academicRole === "student" && ["NCC", "NSS"].includes(primaryClub) ? sankalpProfile : undefined,
+    );
     if (!response.success || !response.data?.user) {
       setError(response.message || "Unable to save your University profile.");
       setLoading(false);
@@ -668,6 +680,7 @@ function UniversityStudentProfileSetup({
               {UNIVERSITY_CLUBS.map((club) => <option key={club.name} value={club.name}>{club.name}</option>)}
             </select>
           </label>
+          {academicRole === "student" && ["NCC", "NSS"].includes(primaryClub) && <div className="space-y-4 rounded-xl border border-blue-100 bg-blue-50/50 p-4"><p className="text-xs font-bold uppercase tracking-wider text-blue-800">Sankalp Club · {primaryClub}</p><p className="text-sm text-slate-600">Complete these details to register as an NCC cadet or NSS volunteer. Only your registered university account will be added.</p>{([["studentId", "Student ID"], ["course", "Course"], ["yearSemester", "Year / Semester"]] as const).map(([key, label]) => <label key={key} className="block text-sm font-semibold text-slate-700">{label}<input required value={sankalpProfile[key]} onChange={(event) => setSankalpProfile((profile) => ({ ...profile, [key]: event.target.value }))} className="mt-1 h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm" /></label>)}<label className="block text-sm font-semibold text-slate-700">Skills / interests (optional)<input value={sankalpProfile.skillsInterests} onChange={(event) => setSankalpProfile((profile) => ({ ...profile, skillsInterests: event.target.value }))} className="mt-1 h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm" /></label></div>}
           {error && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
           {confirmation && <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">{confirmation}</p>}
           <button type="submit" disabled={!department || loading} className="h-11 w-full rounded-lg bg-emerald-800 px-4 text-sm font-bold text-white disabled:opacity-60">{loading ? "Saving profile..." : "Save and continue"}</button>
@@ -1101,6 +1114,10 @@ function Dashboard({ currentUser, setView, onRewardsChanged }: { currentUser: Re
     _id: string;
     title: string;
     status: string;
+    department?: string | null;
+    departmentMentor?: { name?: string } | null;
+    studentsAssigned?: boolean;
+    selectedStudents?: Array<{ studentId?: { _id?: string; name?: string }; organization: "NCC" | "NSS" }>;
     project?: Awaited<ReturnType<typeof getChallenges>>['data'][number]['project'];
   }>>([]);
   const [rewards, setRewards] = useState<Awaited<ReturnType<typeof getMyRewards>>['data']>(undefined);
@@ -1131,6 +1148,10 @@ function Dashboard({ currentUser, setView, onRewardsChanged }: { currentUser: Re
         _id: challenge._id,
         title: challenge.title,
         status: challenge.status,
+        department: challenge.department,
+        departmentMentor: challenge.departmentMentor,
+        studentsAssigned: challenge.studentsAssigned,
+        selectedStudents: challenge.selectedStudents,
         project: challenge.project,
       })));
       setSubmittedCount(myChallenges.length);
@@ -1175,7 +1196,9 @@ function Dashboard({ currentUser, setView, onRewardsChanged }: { currentUser: Re
             <div key={challenge._id} className="rounded-xl border border-slate-100 bg-slate-50 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="min-w-0 flex-1 break-words font-bold text-slate-800">Problem: {challenge.title}</p>
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700">{challenge.status.replaceAll("_", " ")}</span>
               </div>
+              {challenge.department === "Sankalp Club" && <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50/60 p-4"><span className="inline-flex rounded-full bg-blue-100 px-2.5 py-1 text-[10px] font-bold tracking-wide text-blue-800">SANKALP CLUB</span><div className="mt-3 grid gap-2 text-sm text-slate-700 sm:grid-cols-3"><p><span className="font-semibold text-slate-900">Department:</span> Sankalp Club</p><p><span className="font-semibold text-slate-900">Mentor:</span> {challenge.departmentMentor?.name ? "Assigned" : "Pending"}</p><p><span className="font-semibold text-slate-900">Team:</span> {challenge.studentsAssigned ? "NCC/NSS Team Assigned" : "Pending"}</p></div>{challenge.selectedStudents?.length ? <div className="mt-3 flex flex-wrap gap-2">{challenge.selectedStudents.map((member, index) => <span key={`${member.studentId?._id || index}-${member.organization}`} className={`rounded-full px-2.5 py-1 text-xs font-bold ${member.organization === "NCC" ? "bg-orange-100 text-orange-800" : "bg-green-100 text-green-800"}`}>{member.organization}{member.studentId?.name ? ` · ${member.studentId.name}` : ""}</span>)}</div> : null}</div>}
               {challenge.project ? (
                 <div className="mt-3 grid gap-2 text-sm text-slate-600 sm:grid-cols-2">
                   <p><span className="font-semibold text-slate-800">Project:</span> {challenge.project.title || 'Active project'}</p>
@@ -1244,7 +1267,11 @@ export default function PortalShell() {
   const [coordinatorSection, setCoordinatorSection] = useState<CoordinatorSection>("dashboard");
   const [departmentSection, setDepartmentSection] = useState<DepartmentSection>("problems");
   const isCoordinator = role === "University" && currentUser?.universityRole === "innovation_coordinator";
-  const isDepartmentUser = role === "University" && !isCoordinator && (currentUser?.accountType === "faculty" || currentUser?.accountType === "researcher") && Boolean(currentUser?.institution && currentUser?.universityDepartment);
+  const isSankalpMentor = role === "University"
+    && currentUser?.sankalpClubProfile?.club === "Sankalp Club"
+    && currentUser?.sankalpClubProfile?.role === "Sankalp Club Mentor"
+    && currentUser?.sankalpClubProfile?.active === true;
+  const isDepartmentUser = role === "University" && !isCoordinator && !isSankalpMentor && (currentUser?.accountType === "faculty" || currentUser?.accountType === "researcher") && Boolean(currentUser?.institution && currentUser?.universityDepartment);
   useEffect(() => {
     if (window.matchMedia("(max-width: 1023px)").matches) {
       setOpen(false);
@@ -1411,6 +1438,8 @@ export default function PortalShell() {
         ) : view === "university" ? (
           isCoordinator
             ? <UniversityCoordinatorDashboard user={currentUser || {}} section={coordinatorSection} onSectionChange={setCoordinatorSection} />
+            : isSankalpMentor
+              ? <SankalpMentorDashboard user={currentUser || {}} />
             : isDepartmentUser
               ? <DepartmentDashboard user={currentUser || {}} section={departmentSection} onSectionChange={setDepartmentSection} />
               : <UniversityDashboard />

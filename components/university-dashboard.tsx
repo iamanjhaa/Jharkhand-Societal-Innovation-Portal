@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { ArrowUpRight, CheckCircle2, ClipboardList, Plus, UserRound, Wrench, X } from 'lucide-react'
-import { acceptChallenge, acceptUniversitySponsorship, rejectUniversitySponsorship, downloadChallengeAttachment, getChallenges, getCollaborations, getCurrentUserFromStorage, getProjects, getUniversityMembers, getUniversitySponsorships, updateCollaborationStatus, updateProjectStatus, updateProjectTeam, assignChallengeDepartment, getDepartmentMentors, assignChallengeMentor, getClubActivities, getClubMembers, createClubActivity, updateClubActivity, registerForClubActivity } from '@/lib/api'
+import { acceptChallenge, acceptUniversitySponsorship, rejectUniversitySponsorship, downloadChallengeAttachment, getChallenges, getCollaborations, getCurrentUserFromStorage, getProjects, getUniversityMembers, getUniversitySponsorships, updateCollaborationStatus, updateProjectStatus, updateProjectTeam, assignChallengeDepartment, getDepartmentMentors, assignChallengeMentor, getClubActivities, getClubMembers, createClubActivity, updateClubActivity, registerForClubActivity, updateUniversityProfile } from '@/lib/api'
 import { createProject } from '@/lib/api'
 import { DashboardHero, DashboardStats } from '@/components/dashboard-shell'
 import { UNIVERSITY_DEPARTMENTS } from '@/lib/university-departments'
@@ -37,6 +37,9 @@ export default function UniversityDashboard() {
   const [toast, setToast] = useState('')
   const [showProfile, setShowProfile] = useState(false)
   const [currentUser, setCurrentUser] = useState(getCurrentUserFromStorage())
+  const [sankalpProfile, setSankalpProfile] = useState({ studentId: '', course: '', yearSemester: '', skillsInterests: '' })
+  const [sankalpEnrollmentBusy, setSankalpEnrollmentBusy] = useState(false)
+  const [sankalpEnrollmentMessage, setSankalpEnrollmentMessage] = useState('')
   const [showCreateProject, setShowCreateProject] = useState(false)
   const [creatingProject, setCreatingProject] = useState(false)
   const [projectError, setProjectError] = useState('')
@@ -110,7 +113,10 @@ export default function UniversityDashboard() {
     }
     loadDashboard()
   }, [])
-  const relevantChallenges = (challengeData || []).filter((challenge) => !currentUser?._id || challenge.assignedUniversity?._id === currentUser._id || challenge.departmentMentor?._id === currentUser._id)
+  const relevantChallenges = (challengeData || []).filter((challenge) => !currentUser?._id
+    || challenge.assignedUniversity?._id === currentUser._id
+    || challenge.departmentMentor?._id === currentUser._id
+    || challenge.selectedStudents?.some((selection) => selection.studentId?._id === currentUser._id))
   const relevantProjects = (projectData || []).filter((project) => !currentUser?._id || project.university?._id === currentUser._id)
   const availableChallenges = (challengeData || []).filter((challenge) => currentUser?.role === 'university' && currentUser._id && (challenge.assignedUniversity?._id === currentUser._id || challenge.departmentMentor?._id === currentUser._id))
   const projectReadyChallenges = availableChallenges.filter((challenge) => challenge.assignmentStatus === 'accepted' && challenge.industryFundingStatus === 'accepted')
@@ -263,6 +269,26 @@ export default function UniversityDashboard() {
     setAcceptingSponsorshipId('')
   }
 
+  async function enrollInSankalpClub(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!currentUser?.universityDepartment || !['NCC', 'NSS'].includes(currentUser.primaryClub) || sankalpEnrollmentBusy) return
+    setSankalpEnrollmentBusy(true)
+    setSankalpEnrollmentMessage('')
+    const response = await updateUniversityProfile(
+      currentUser.universityDepartment,
+      'student',
+      currentUser.primaryClub,
+      sankalpProfile,
+    )
+    if (!response.success || !response.data?.user) {
+      setSankalpEnrollmentMessage(response.message || 'Unable to register your Sankalp Club membership.')
+    } else {
+      setCurrentUser(response.data.user)
+      setSankalpEnrollmentMessage('You are registered as an active Sankalp Club member.')
+    }
+    setSankalpEnrollmentBusy(false)
+  }
+
   async function handleRejectSponsorship(challengeId: string) {
     if (acceptingSponsorshipId) return
     setAcceptingSponsorshipId(challengeId)
@@ -335,6 +361,7 @@ export default function UniversityDashboard() {
   if (loading) return <div className="min-h-full bg-slate-50 p-5 sm:p-8"><div className="mx-auto max-w-[1450px] rounded-2xl border border-slate-200 bg-white p-12 text-center"><p className="font-bold text-slate-800">Loading university data...</p><p className="mt-1 text-sm text-slate-500">Fetching challenges and projects.</p></div></div>
   if (error) return <div className="min-h-full bg-slate-50 p-5 sm:p-8"><div className="mx-auto max-w-[1450px] rounded-2xl border border-red-200 bg-red-50 p-12 text-center"><p className="font-bold text-red-800">Unable to load university data</p><p className="mt-1 text-sm text-red-700">{error}</p></div></div>
   return <div className="mobile-role-dashboard relative min-h-full min-w-0 bg-slate-50 p-5 sm:p-8">{mentorChallengeId && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4"><div role="dialog" aria-modal="true" aria-labelledby="department-mentor-title" className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between gap-4"><div><p className="text-[11px] font-bold uppercase tracking-wider text-orange-700">University coordination</p><h2 id="department-mentor-title" className="text-xl font-bold text-slate-950">Assign Department Mentor</h2></div><button type="button" onClick={() => setMentorChallengeId('')} aria-label="Close department mentor assignment"><X className="size-5 text-slate-500" /></button></div>{loadingDepartmentMentors ? <p className="mt-6 text-sm text-slate-500">Loading eligible faculty mentors...</p> : departmentMentorError ? <p className="mt-6 rounded-lg bg-red-50 p-3 text-sm text-red-700">{departmentMentorError}</p> : departmentMentors?.length ? <div className="mt-6 space-y-2">{departmentMentors.map((mentor) => <button key={mentor._id} type="button" disabled={assigningMentor} onClick={() => void handleAssignMentor(mentor._id)} className="flex w-full items-start justify-between gap-3 rounded-lg border border-slate-200 p-3 text-left hover:border-emerald-700 disabled:opacity-50"><span className="min-w-0"><span className="block break-words text-sm font-bold text-slate-900">{mentor.name}</span><span className="mt-1 block break-words text-xs text-slate-500">{mentor.email || 'Email unavailable'} · {mentor.universityDepartment}</span></span><span className="shrink-0 text-xs font-bold text-emerald-800">{assigningMentor ? 'Assigning...' : 'Assign'}</span></button>)}</div> : <p className="mt-6 rounded-lg bg-slate-50 p-3 text-sm text-slate-500">No eligible faculty mentors are registered for this department.</p>}<button type="button" onClick={() => setMentorChallengeId('')} className="mt-6 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm font-bold text-slate-700">Close</button></div></div>}{departmentChallengeId && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4"><div role="dialog" aria-modal="true" className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between gap-4"><div><p className="text-[11px] font-bold uppercase tracking-wider text-orange-700">University coordination</p><h2 className="text-xl font-bold text-slate-950">Assign Department</h2></div><button type="button" onClick={() => setDepartmentChallengeId('')} aria-label="Close department assignment"><X className="size-5 text-slate-500" /></button></div><label className="mt-6 block text-sm font-semibold text-slate-700">University Department<select value={selectedDepartment} onChange={(event) => setSelectedDepartment(event.target.value)} className="mt-1 h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"><option value="">Select department</option>{UNIVERSITY_DEPARTMENTS.map((department) => <option key={department} value={department}>{department}</option>)}</select></label><button type="button" disabled={!selectedDepartment || assigningDepartment} onClick={() => void handleAssignDepartment()} className="mt-6 w-full rounded-lg bg-emerald-800 px-4 py-3 text-sm font-bold text-white disabled:opacity-50">{assigningDepartment ? 'Assigning...' : 'Assign Department'}</button></div></div>  }{showTeamEditor && <TeamEditor members={eligibleTeamMembers(relevantProjects.find((project) => project._id === teamProjectId) || relevantProjects[0]) || []} selection={teamSelection} saving={savingTeam} onToggle={(id, checked) => setTeamSelection(checked ? [...teamSelection, id] : teamSelection.filter((selectedId) => selectedId !== id))} onSave={() => void saveTeam()} onClose={() => setShowTeamEditor(false)} />}{showProfile && currentUser && <ProfileModal user={currentUser} onClose={() => setShowProfile(false)} />}{toast && <div className="fixed bottom-5 right-5 z-50 rounded-xl bg-emerald-900 px-4 py-3 text-sm font-semibold text-white shadow-lg">{toast}</div>}{selectedChallenge && <ChallengeDetailsModal challenge={selectedChallenge} onClose={() => setSelectedChallenge(null)} />}<div className="mx-auto max-w-[1450px]">{(!relevantChallenges.length || !relevantProjects.length) && <div className="mb-6 rounded-xl border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-500">{!relevantChallenges.length && !relevantProjects.length ? 'No assigned challenges or projects are available for this university yet.' : !relevantChallenges.length ? 'No assigned challenges are available for this university yet.' : 'No projects are available for this university yet.'}</div>}
+    {currentUser?.role === 'university' && currentUser.accountType === 'student' && ['NCC', 'NSS'].includes(currentUser.primaryClub) && !currentUser.sankalpClubProfile?.active && <form onSubmit={enrollInSankalpClub} className="mx-auto mb-6 max-w-[1450px] rounded-2xl border border-blue-100 bg-white p-5 shadow-sm sm:p-6"><span className="inline-flex rounded-full bg-blue-100 px-2.5 py-1 text-[11px] font-bold tracking-wide text-blue-800">SANKALP CLUB · {currentUser.primaryClub}</span><h2 className="mt-3 text-lg font-bold text-slate-950">Register your NCC / NSS membership</h2><p className="mt-1 text-sm text-slate-600">Use your real student details to become eligible for Sankalp Club problem teams.</p><div className="mt-4 grid gap-3 sm:grid-cols-3">{([['studentId', 'Student ID'], ['course', 'Course'], ['yearSemester', 'Year / Semester']] as const).map(([key, label]) => <label key={key} className="text-sm font-semibold text-slate-700">{label}<input required value={sankalpProfile[key]} onChange={(event) => setSankalpProfile((profile) => ({ ...profile, [key]: event.target.value }))} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>)}</div><label className="mt-3 block text-sm font-semibold text-slate-700">Skills / interests (optional)<input value={sankalpProfile.skillsInterests} onChange={(event) => setSankalpProfile((profile) => ({ ...profile, skillsInterests: event.target.value }))} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label><div className="mt-4 flex flex-wrap items-center gap-3"><button type="submit" disabled={sankalpEnrollmentBusy} className="rounded-lg bg-[#06245C] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50">{sankalpEnrollmentBusy ? 'Registering...' : 'Join Sankalp Club'}</button>{sankalpEnrollmentMessage && <p role="status" className="text-sm text-slate-600">{sankalpEnrollmentMessage}</p>}</div></form>}
     <DashboardHero eyebrow="University dashboard" title="University innovation workspace" greeting="Good morning, University Team" subtitle="Here is what is happening with your assigned challenges and projects." actions={<button onClick={() => setShowProfile(true)} className="rounded-lg border border-white/30 bg-white/10 px-4 py-2.5 text-sm font-bold text-white hover:bg-white/20">My profile</button>} />
     <div className="mt-6"><DashboardStats stats={[
       { label: 'Assigned challenges', value: String(assignedCount), note: 'From current API data', icon: ClipboardList },

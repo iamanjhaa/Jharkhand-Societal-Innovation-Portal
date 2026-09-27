@@ -101,7 +101,7 @@ export const getUniversityMembers = async (req, res, next) => {
     }
 
     const members = await User.find({ role: 'university', institution: user.institution })
-      .select('_id name email institution universityDepartment accountType')
+      .select('_id name email mobile institution universityDepartment accountType sankalpClubProfile.club sankalpClubProfile.role sankalpClubProfile.active')
       .sort({ name: 1 })
       .lean();
 

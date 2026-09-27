@@ -13,6 +13,13 @@ export async function assignChallengeDepartment(challengeId: string, department:
   });
 }
 
+export async function assignSankalpDepartment(challengeId: string, department: string, mentorId: string) {
+  return apiCall(`/api/challenges/${encodeURIComponent(challengeId)}/department`, {
+    method: 'PATCH',
+    body: JSON.stringify({ department, mentorId }),
+  });
+}
+
 export async function getDepartmentMentors(challengeId: string) {
   return apiCall<Array<{
     _id: string;
@@ -192,7 +199,12 @@ export async function getCurrentUser() {
   });
 }
 
-export async function updateUniversityProfile(department: string, accountType: 'student' | 'researcher', primaryClub: string) {
+export async function updateUniversityProfile(
+  department: string,
+  accountType: 'student' | 'researcher',
+  primaryClub: string,
+  sankalpProfile?: { studentId: string; course: string; yearSemester: string; skillsInterests?: string },
+) {
   return apiCall<{ user: {
     _id: string;
     name: string;
@@ -202,9 +214,62 @@ export async function updateUniversityProfile(department: string, accountType: '
     universityDepartment?: string;
     accountType?: string;
     universityRole?: 'member' | 'innovation_coordinator';
+    sankalpClubProfile?: { club: string; organization: 'NCC' | 'NSS'; role: 'cadet' | 'volunteer'; active: boolean };
   } }>('/api/auth/university-profile', {
     method: 'PATCH',
-    body: JSON.stringify({ department, accountType, primaryClub }),
+    body: JSON.stringify({ department, accountType, primaryClub, ...sankalpProfile }),
+  });
+}
+
+export type SankalpStudent = {
+  _id: string;
+  name: string;
+  studentId: string;
+  institution: string;
+  course: string;
+  yearSemester: string;
+  organization: 'NCC' | 'NSS';
+  role: 'cadet' | 'volunteer';
+  skillsInterests?: string;
+  availability: 'Available';
+  currentAssignments: number;
+};
+
+export async function getSankalpMentors() {
+  return apiCall<Array<{
+    _id: string;
+    name: string;
+    email?: string;
+    mobile?: string;
+    institution?: string;
+    role: 'Sankalp Club Mentor';
+    club: 'Sankalp Club';
+    active: boolean;
+  }>>('/api/sankalp/mentors', { method: 'GET' });
+}
+
+export async function registerSankalpMentor(mentorId: string) {
+  return apiCall<{ _id: string; name: string; role: 'Sankalp Club Mentor'; club: 'Sankalp Club'; active: boolean }>(
+    '/api/sankalp/mentors',
+    { method: 'POST', body: JSON.stringify({ mentorId }) },
+  );
+}
+
+export async function getSankalpStudents(organization: 'NCC' | 'NSS') {
+  return apiCall<SankalpStudent[]>(`/api/sankalp/students?organization=${organization}`, { method: 'GET' });
+}
+
+export async function assignSankalpStudents(challengeId: string, studentIds: string[]) {
+  return apiCall(`/api/sankalp/assign-students`, {
+    method: 'POST',
+    body: JSON.stringify({ challengeId, studentIds }),
+  });
+}
+
+export async function submitSankalpChallengeForVerification(challengeId: string) {
+  return apiCall(`/api/sankalp/challenges/${encodeURIComponent(challengeId)}/submit-for-verification`, {
+    method: 'POST',
+    body: JSON.stringify({}),
   });
 }
 
@@ -226,6 +291,40 @@ export async function updateClubActivity(club: string, activityId: string, data:
 
 export async function registerForClubActivity(club: string, activityId: string) {
   return apiCall(`/api/clubs/${encodeURIComponent(club)}/activities/${encodeURIComponent(activityId)}/register`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+export async function searchBloodBanks(payload: {
+  bloodGroup: string;
+  component?: string;
+  units?: number;
+  latitude: number;
+  longitude: number;
+  radiusKm?: number;
+}) {
+  return apiCall<{
+    source?: string;
+    query?: { bloodGroup?: string; component?: string; units?: number; latitude?: number; longitude?: number };
+    results?: Array<{
+      name?: string | null;
+      address?: string | null;
+      distanceKm?: number | null;
+      availability?: 'available' | 'unavailable' | 'unknown';
+      lastUpdated?: string | null;
+      phone?: string | null;
+      latitude?: number | null;
+      longitude?: number | null;
+      bloodGroup?: string;
+      component?: string;
+      units?: number | null;
+      source?: string;
+      verified?: boolean;
+    }>;
+    message?: string;
+    lastUpdated?: string | null;
+  }>('/api/sahayak/blood-search', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function chatWithSahayak(problem: string, language: 'en' | 'hi' = 'en') {
@@ -508,6 +607,11 @@ export async function getChallenges() {
     rawStatus?: string;
     assignedUniversity?: { _id?: string; name?: string; email?: string; institution?: string; universityDepartment?: string };
     departmentMentor?: { _id?: string; name?: string; email?: string; institution?: string; universityDepartment?: string; accountType?: string } | null;
+    mentorAssigned?: boolean;
+    studentsAssigned?: boolean;
+    selectedStudents?: Array<{ studentId?: { _id?: string; name?: string; institution?: string }; organization: 'NCC' | 'NSS'; selectedAt?: string }>;
+    urgency?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+    rewardProcessed?: boolean;
     citizenContactNumber?: string;
     affected?: string;
     expectedImpact?: string;
@@ -518,7 +622,6 @@ export async function getChallenges() {
     implementationDetails?: string;
     expectedOutcome?: string;
     solutionStatus?: 'draft' | 'submitted';
-    urgency?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
     urgencySource?: 'ai_detected' | 'manually_adjusted' | 'fallback';
     urgencyReason?: string;
     project?: {
@@ -584,6 +687,7 @@ export async function getUniversityMembers() {
     universityDepartment?: string;
     facultyMentor?: { _id?: string; name?: string; email?: string; universityDepartment?: string; accountType?: string };
     accountType?: string;
+    sankalpClubProfile?: { club?: string; role?: string; active?: boolean };
   }>>('/api/users/university-members', { method: 'GET' });
 }
 

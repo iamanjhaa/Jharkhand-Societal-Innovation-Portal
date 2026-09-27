@@ -269,7 +269,19 @@ Verified solutions become reusable knowledge for future societal challenges.
 
 Provides AI-assisted support with online and offline assistance capabilities.
 
-🌍 Expected Impact
+## Sankalp Club workflow
+
+Sankalp Club is a special problem assignment destination, separate from the six academic departments. It uses the existing university coordinator workflow:
+
+1. Government assigns the problem to a university and the university accepts it.
+2. The University Coordinator opens **Faculty & mentors** and designates an existing faculty account as a Sankalp Club Mentor. No mentor accounts or student records are seeded.
+3. In **Assign Department**, the coordinator selects **Sankalp Club**, confirms the Sankalp Club type, and selects an active mentor.
+4. An NCC/NSS student enrolls with their registered university profile and provides their real Student ID, course, and year/semester. The mentor dashboard then lists eligible active, available members from that same university.
+5. The mentor can build a mixed NCC/NSS team and submit the assigned problem for Government verification. Students remain reserved until the problem is resolved, rejected, or cancelled.
+
+The Sankalp APIs are authenticated under `/api/sankalp`: `GET /mentors` and `POST /mentors` are University Coordinator operations, `GET /students?organization=NCC|NSS` and `POST /assign-students` require an active Sankalp Club Mentor profile, and `POST /challenges/:id/submit-for-verification` submits that mentor's assigned problem for Government verification.
+
+## Expected Impact
 Citizens
 
 Better problem reporting, transparency, and progress tracking.

@@ -5,7 +5,7 @@ import mongoose from 'mongoose';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { isAllowedChallengeType, challengeUploadDirectory } from '../middleware/challengeUpload.js';
-import { UNIVERSITY_DEPARTMENTS } from '../constants/universityDepartments.js';
+import { UNIVERSITY_ASSIGNMENT_DEPARTMENTS, SANKALP_CLUB } from '../constants/universityDepartments.js';
 import { normalizeInstitution } from '../utils/universityCoordinatorCodes.js';
 import { createNotification } from '../utils/notifications.js';
 
@@ -16,6 +16,13 @@ function deriveCitizenWorkflowStatus(challenge, project) {
   if (project?.currentStage === 'testing' || project?.status === 'testing') return 'TESTING';
   if (project) return 'IN DEVELOPMENT';
   if (challenge.industryFundingStatus === 'accepted') return 'FUNDING ACCEPTED';
+  if (challenge.department === SANKALP_CLUB) {
+    if (challenge.status === 'under_review') return 'AWAITING GOVERNMENT VERIFICATION';
+    if (challenge.status === 'approved') return 'GOVERNMENT VERIFIED';
+    if (challenge.studentsAssigned) return 'IN DEVELOPMENT';
+    if (challenge.departmentMentor) return 'SANKALP MENTOR ASSIGNED';
+    return 'SANKALP CLUB ASSIGNED';
+  }
   if (challenge.department) return 'AWAITING INDUSTRY FUNDING';
   if (challenge.assignmentStatus === 'accepted') return 'UNIVERSITY ACCEPTED';
   if (challenge.assignedUniversity) return 'UNIVERSITY ASSIGNED';
@@ -38,6 +45,13 @@ function serializeCitizenChallenge(challenge, project) {
     acceptedByUniversity: challenge.acceptedByUniversity,
     department: challenge.department,
     departmentMentor: challenge.departmentMentor,
+    mentorAssigned: Boolean(challenge.departmentMentor),
+    studentsAssigned: Boolean(challenge.studentsAssigned),
+    selectedStudents: (challenge.selectedStudents || []).map((selection) => ({
+      studentId: selection.studentId,
+      organization: selection.organization,
+      selectedAt: selection.selectedAt
+    })),
     industryFundingStatus: challenge.industryFundingStatus,
     industryFundedBy: challenge.industryFundedBy,
     project: project ? {
@@ -52,6 +66,19 @@ function serializeCitizenChallenge(challenge, project) {
       teamMembers: project.teamMembers,
     } : null,
   };
+}
+
+async function releaseSankalpStudents(challenge) {
+  if (!challenge?.selectedStudents?.length) return;
+  await User.updateMany({
+    _id: { $in: challenge.selectedStudents.map((selection) => selection.studentId?._id || selection.studentId) },
+    'sankalpClubProfile.currentAssignment': challenge._id
+  }, {
+    $set: {
+      'sankalpClubProfile.available': true,
+      'sankalpClubProfile.currentAssignment': null
+    }
+  });
 }
 
 function governmentDistrict(user) {
@@ -397,7 +424,11 @@ export const downloadChallengeAttachment = async (req, res, next) => {
 
     const canAccess = req.user.role === 'government'
       || (req.user.role === 'citizen' && challenge.submittedBy.toString() === req.user.id)
-      || (req.user.role === 'university' && challenge.assignedUniversity?.toString() === req.user.id);
+      || (req.user.role === 'university' && (
+        challenge.assignedUniversity?.toString() === req.user.id
+        || challenge.departmentMentor?.toString() === req.user.id
+        || challenge.selectedStudents?.some((selection) => selection.studentId.toString() === req.user.id)
+      ));
     if (!canAccess) return res.status(403).json({ success: false, message: 'You do not have access to this attachment' });
 
     const attachment = challenge.attachments.id(req.params.attachmentId);
@@ -525,7 +556,7 @@ export const acceptChallenge = async (req, res, next) => {
 export const assignChallengeDepartment = async (req, res, next) => {
   try {
     const department = String(req.body.department || '').trim();
-    if (!UNIVERSITY_DEPARTMENTS.includes(department)) {
+    if (!UNIVERSITY_ASSIGNMENT_DEPARTMENTS.includes(department)) {
       return res.status(400).json({ success: false, message: 'Select a valid university department' });
     }
 
@@ -556,6 +587,28 @@ export const assignChallengeDepartment = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'This challenge is assigned to another university' });
     }
 
+    let sankalpMentor = null;
+    if (department === SANKALP_CLUB) {
+      if (!mongoose.isValidObjectId(req.body.mentorId)) {
+        return res.status(400).json({ success: false, message: 'Select a Sankalp Club mentor before assigning this department' });
+      }
+      sankalpMentor = await User.findOne({
+        _id: req.body.mentorId,
+        role: 'university',
+        accountType: 'faculty',
+        institution: assignedUniversity.institution,
+        'sankalpClubProfile.club': SANKALP_CLUB,
+        'sankalpClubProfile.role': 'Sankalp Club Mentor',
+        'sankalpClubProfile.active': true
+      }).select('_id name email institution accountType sankalpClubProfile.club sankalpClubProfile.role');
+      if (!sankalpMentor) {
+        return res.status(400).json({ success: false, message: 'Select an active Sankalp Club mentor registered at this University' });
+      }
+      challenge.departmentMentor = sankalpMentor._id;
+      challenge.departmentMentorAssignedBy = coordinator._id;
+      challenge.departmentMentorAssignedAt = new Date();
+      challenge.mentorAssigned = true;
+    }
     challenge.department = department;
     challenge.departmentAssignedBy = coordinator._id;
     challenge.departmentAssignedAt = new Date();
@@ -595,9 +648,24 @@ export const assignChallengeDepartment = async (req, res, next) => {
         relatedEntityId: challenge._id,
       }).catch((error) => console.error(`Notification creation failed: ${error.message}`));
     }
+    if (sankalpMentor) {
+      void createNotification({
+        recipient: sankalpMentor._id,
+        recipientRole: 'university',
+        type: 'department_assigned',
+        title: 'Sankalp Club problem assigned',
+        message: `"${challenge.title}" has been assigned to you as a Sankalp Club mentor.`,
+        relatedEntityType: 'challenge',
+        relatedEntityId: challenge._id,
+        actor: req.user.id,
+        actorRole: 'university',
+        eventKey: `sankalp_mentor_assigned:${challenge._id}:${sankalpMentor._id}`,
+      }).catch((error) => console.error(`Notification creation failed: ${error.message}`));
+    }
     await challenge.populate([
       { path: 'assignedUniversity', select: 'name email institution universityDepartment' },
-      { path: 'departmentAssignedBy', select: 'name email institution universityRole' }
+      { path: 'departmentAssignedBy', select: 'name email institution universityRole' },
+      { path: 'departmentMentor', select: 'name email institution accountType sankalpClubProfile.club sankalpClubProfile.role' }
     ]);
     return res.status(200).json({ success: true, message: 'Challenge department assigned successfully', data: challenge });
   } catch (error) {
@@ -694,10 +762,11 @@ export const assignChallengeMentor = async (req, res, next) => {
     context.challenge.departmentMentor = mentor._id;
     context.challenge.departmentMentorAssignedBy = context.coordinator._id;
     context.challenge.departmentMentorAssignedAt = new Date();
+    context.challenge.mentorAssigned = true;
     await context.challenge.save();
     await context.challenge.populate([
       { path: 'assignedUniversity', select: 'name email institution universityDepartment' },
-      { path: 'departmentMentor', select: 'name email institution universityDepartment accountType' },
+      { path: 'departmentMentor', select: 'name email institution universityDepartment accountType sankalpClubProfile.club sankalpClubProfile.role' },
       { path: 'departmentMentorAssignedBy', select: 'name email institution universityRole' }
     ]);
 
@@ -741,10 +810,15 @@ export const getAllChallenges = async (req, res, next) => {
         const universityIds = await User.find({ role: 'university', institution: user.institution }).distinct('_id');
         filter.$or = [
           { assignedUniversity: { $in: universityIds }, department: user.universityDepartment },
-          { departmentMentor: req.user.id }
+          { departmentMentor: req.user.id },
+          { 'selectedStudents.studentId': req.user.id }
         ];
       } else {
-        filter.$or = [{ assignedUniversity: req.user.id }, { departmentMentor: req.user.id }];
+        filter.$or = [
+          { assignedUniversity: req.user.id },
+          { departmentMentor: req.user.id },
+          { 'selectedStudents.studentId': req.user.id }
+        ];
       }
     } else if (req.user.role === 'citizen') {
       filter.submittedBy = req.user.id;
@@ -775,7 +849,11 @@ export const getAllChallenges = async (req, res, next) => {
       });
     challengeQuery.populate({
       path: 'departmentMentor',
-      select: 'name email institution universityDepartment accountType'
+      select: 'name email institution universityDepartment accountType sankalpClubProfile.club sankalpClubProfile.role'
+    });
+    challengeQuery.populate({
+      path: 'selectedStudents.studentId',
+      select: 'name institution sankalpClubProfile.organization sankalpClubProfile.role'
     });
     if (req.user.role === 'government') {
       challengeQuery.populate({
@@ -838,7 +916,11 @@ export const getChallengeById = async (req, res, next) => {
       });
     challengeQuery.populate({
       path: 'departmentMentor',
-      select: 'name email institution universityDepartment accountType'
+      select: 'name email institution universityDepartment accountType sankalpClubProfile.club sankalpClubProfile.role'
+    });
+    challengeQuery.populate({
+      path: 'selectedStudents.studentId',
+      select: 'name institution sankalpClubProfile.organization sankalpClubProfile.role'
     });
     if (req.user.role === 'government') {
       challengeQuery.populate({
@@ -855,7 +937,14 @@ export const getChallengeById = async (req, res, next) => {
       });
     }
 
-    if (req.user.role === 'university' && (!challenge.assignedUniversity || challenge.assignedUniversity._id.toString() !== req.user.id)) {
+    if (req.user.role === 'university' && (!challenge.assignedUniversity || (
+      challenge.assignedUniversity._id.toString() !== req.user.id
+      && challenge.departmentMentor?._id?.toString() !== req.user.id
+      && !(challenge.selectedStudents || []).some((selection) => (
+        selection.studentId?._id?.toString() === req.user.id
+        || selection.studentId?.toString() === req.user.id
+      ))
+    ))) {
       return res.status(403).json({
         success: false,
         message: 'You do not have access to this challenge'
@@ -932,7 +1021,7 @@ export const updateChallengeStatus = async (req, res, next) => {
       });
     }
 
-    const existingChallenge = await Challenge.findById(id).select('status district assignedUniversity assignmentStatus acceptedByUniversity rewardProcessed');
+    const existingChallenge = await Challenge.findById(id).select('status district assignedUniversity assignmentStatus acceptedByUniversity rewardProcessed department studentsAssigned');
     if (!existingChallenge) {
       return res.status(404).json({
         success: false,
@@ -945,11 +1034,15 @@ export const updateChallengeStatus = async (req, res, next) => {
     const allowedTransitions = {
       submitted: ['under_review'],
       under_review: ['approved', 'rejected'],
-      approved: ['approved'],
+      approved: existingChallenge.department === SANKALP_CLUB && existingChallenge.rewardProcessed
+        ? ['approved', 'resolved']
+        : ['approved'],
       assigned: ['assigned'],
       accepted: ['accepted', 'funding_approved'],
       funding_approved: ['funding_approved'],
-      in_progress: ['in_progress'],
+      in_progress: existingChallenge.department === SANKALP_CLUB && existingChallenge.studentsAssigned
+        ? ['in_progress', 'under_review']
+        : ['in_progress'],
       resolved: ['resolved'],
       rejected: ['rejected']
     };
@@ -977,6 +1070,7 @@ export const updateChallengeStatus = async (req, res, next) => {
         { status: 'resolved' },
         { new: true, runValidators: true }
       );
+      await releaseSankalpStudents(completedChallenge);
       void createNotification({
         recipient: completedChallenge.submittedBy,
         recipientRole: 'citizen',
@@ -1055,6 +1149,9 @@ export const updateChallengeStatus = async (req, res, next) => {
         success: false,
         message: 'Challenge not found'
       });
+    }
+    if (['resolved', 'completed', 'cancelled', 'rejected'].includes(status)) {
+      await releaseSankalpStudents(challenge);
     }
 
     res.status(200).json({
@@ -1341,6 +1438,7 @@ export const cancelChallenge = async (req, res, next) => {
       ? req.body.cancellationReason.trim() || null
       : null;
     await challenge.save();
+    await releaseSankalpStudents(challenge);
     await challenge.populate([
       { path: 'assignedUniversity', select: 'name email institution universityDepartment' },
       { path: 'cancelledBy', select: 'name email role' }
@@ -1396,6 +1494,7 @@ export const deleteChallenge = async (req, res, next) => {
     }
 
     // Delete challenge
+    await releaseSankalpStudents(challenge);
     await Challenge.findByIdAndDelete(id);
 
     res.status(200).json({

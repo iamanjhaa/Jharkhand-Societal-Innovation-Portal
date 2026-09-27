@@ -1,6 +1,26 @@
 import mongoose from 'mongoose';
 import bcryptjs from 'bcryptjs';
 
+const sankalpClubProfileSchema = new mongoose.Schema(
+  {
+    club: { type: String, enum: ['Sankalp Club'] },
+    organization: { type: String, enum: ['NCC', 'NSS'] },
+    role: { type: String, enum: ['Sankalp Club Mentor', 'cadet', 'volunteer'] },
+    active: { type: Boolean, default: true },
+    available: { type: Boolean, default: true },
+    studentId: { type: String, trim: true },
+    course: { type: String, trim: true },
+    yearSemester: { type: String, trim: true },
+    skillsInterests: { type: String, trim: true },
+    currentAssignment: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Challenge',
+      default: null
+    }
+  },
+  { _id: false }
+);
+
 const userSchema = new mongoose.Schema(
   {
     // Common fields
@@ -99,6 +119,10 @@ const userSchema = new mongoose.Schema(
       enum: ['NCC', 'NSS', 'Rovers & Rangers', 'Red Ribbon Club', 'Eco Club', 'Innovation & Entrepreneurship Club'],
       default: null
     },
+    sankalpClubProfile: {
+      type: sankalpClubProfileSchema,
+      default: undefined
+    },
     accountType: {
       type: String,
       enum: {
@@ -167,6 +191,7 @@ userSchema.methods.toJSON = function() {
 userSchema.index({ role: 1, institution: 1, accountType: 1 });
 userSchema.index({ role: 1, institution: 1, universityDepartment: 1 });
 userSchema.index({ role: 1, governmentDistrict: 1 });
+userSchema.index({ role: 1, institution: 1, 'sankalpClubProfile.club': 1, 'sankalpClubProfile.organization': 1, 'sankalpClubProfile.role': 1, 'sankalpClubProfile.active': 1 });
 
 const User = mongoose.model('User', userSchema);
 

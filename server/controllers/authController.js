@@ -287,7 +287,7 @@ export const getCurrentUser = async (req, res, next) => {
 // @access  Private - University student/research student only
 export const updateUniversityProfile = async (req, res, next) => {
   try {
-    const { department, accountType, primaryClub } = req.body;
+    const { department, accountType, primaryClub, studentId, course, yearSemester, skillsInterests } = req.body;
     if (!UNIVERSITY_DEPARTMENTS.includes(department)) {
       return res.status(400).json({ success: false, message: 'Select a valid university department' });
     }
@@ -309,6 +309,31 @@ export const updateUniversityProfile = async (req, res, next) => {
     user.universityDepartment = department;
     user.accountType = accountType;
     user.primaryClub = primaryClub;
+    if (accountType === 'student' && ['NCC', 'NSS'].includes(primaryClub)) {
+      const normalizedStudentId = String(studentId || '').trim();
+      const normalizedCourse = String(course || '').trim();
+      const normalizedYearSemester = String(yearSemester || '').trim();
+      if (!normalizedStudentId || !normalizedCourse || !normalizedYearSemester) {
+        return res.status(400).json({
+          success: false,
+          message: 'Student ID, course, and year/semester are required for Sankalp Club membership'
+        });
+      }
+      user.sankalpClubProfile = {
+        club: 'Sankalp Club',
+        organization: primaryClub,
+        role: primaryClub === 'NCC' ? 'cadet' : 'volunteer',
+        active: true,
+        available: true,
+        studentId: normalizedStudentId,
+        course: normalizedCourse,
+        yearSemester: normalizedYearSemester,
+        skillsInterests: String(skillsInterests || '').trim() || undefined,
+        currentAssignment: null
+      };
+    } else if (!user.sankalpClubProfile?.currentAssignment) {
+      user.sankalpClubProfile = undefined;
+    }
     await user.save();
 
     return res.status(200).json({

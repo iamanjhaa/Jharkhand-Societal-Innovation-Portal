@@ -254,6 +254,32 @@ const challengeSchema = new mongoose.Schema(
       type: Date,
       default: null
     },
+    mentorAssigned: {
+      type: Boolean,
+      default: false
+    },
+    studentsAssigned: {
+      type: Boolean,
+      default: false
+    },
+    selectedStudents: [
+      {
+        studentId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+          required: true
+        },
+        organization: {
+          type: String,
+          enum: ['NCC', 'NSS'],
+          required: true
+        },
+        selectedAt: {
+          type: Date,
+          default: Date.now
+        }
+      }
+    ],
     cancelledBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',

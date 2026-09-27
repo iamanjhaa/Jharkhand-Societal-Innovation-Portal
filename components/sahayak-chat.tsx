@@ -1,11 +1,28 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Bot, ChevronDown, Loader2, Send, Sparkles, X } from "lucide-react";
-import { chatWithSahayak } from "@/lib/api";
+import { Bot, ChevronDown, Clock3, Loader2, MapPin, Navigation, Phone, Send, Sparkles, X } from "lucide-react";
+import { chatWithSahayak, searchBloodBanks } from "@/lib/api";
+import { detectBloodAssistance } from "@/lib/blood-assistance";
 import { emergencyHelplines, getEmergencyGuidance } from "@/lib/emergency-helplines";
 import { getOfflineSahayakResponse } from "@/lib/offline-sahayak";
 import EmergencyVoiceMode from "@/components/emergency-voice-mode";
+
+type BloodBankResult = {
+  name?: string | null;
+  address?: string | null;
+  distanceKm?: number | null;
+  availability?: "available" | "unavailable" | "unknown" | string;
+  lastUpdated?: string | null;
+  phone?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  bloodGroup?: string;
+  component?: string;
+  units?: number | null;
+  source?: string;
+  verified?: boolean;
+};
 
 type SahayakResponse = {
   message?: string;
@@ -19,6 +36,9 @@ type SahayakResponse = {
   helplines?: { name?: string; number?: string; purpose?: string }[];
   emergency?: boolean;
   emergencyScenario?: Parameters<typeof getEmergencyGuidance>[0];
+  bloodResults?: BloodBankResult[];
+  bloodQuery?: { bloodGroup?: string; component?: string; units?: number };
+  bloodSearchMessage?: string;
 };
 
 type Message = { id: number; author: "user" | "sahayak"; text?: string; response?: SahayakResponse };
@@ -30,8 +50,97 @@ const quickActions: { label: string; view: View }[] = [
   { label: "My Submissions", view: "citizen" },
 ];
 
+function BloodResultCard({ result }: { result: BloodBankResult }) {
+  const formattedDistance = typeof result.distanceKm === 'number' ? `${result.distanceKm.toFixed(1)} km` : "Distance unavailable";
+  const availability = result.availability === "available"
+    ? "Available"
+    : result.availability === "unavailable"
+      ? "Unavailable"
+      : "Availability not verified";
+  const hasLocation = typeof result.latitude === 'number' && typeof result.longitude === 'number';
+  const directionsUrl = hasLocation
+    ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(result.latitude ?? 0)},${encodeURIComponent(result.longitude ?? 0)}`
+    : result.address
+      ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(result.address)}`
+      : null;
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="flex items-center gap-2 text-sm font-extrabold text-slate-900">
+            <span className="rounded-full bg-emerald-100 p-1 text-emerald-700">🏥</span>
+            <span className="truncate">{result.name || "Name not provided by eRaktKosh"}</span>
+          </p>
+          <p className="mt-1 flex items-start gap-1 text-xs text-slate-600">
+            <MapPin className="mt-0.5 size-3.5 shrink-0" />
+            <span>{result.address || "Address not provided by eRaktKosh"}</span>
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-700">
+        <div className="rounded-lg bg-slate-50 p-2">
+          <p className="font-bold text-slate-500">Distance</p>
+          <p className="mt-1 flex items-center gap-1 font-semibold"><Navigation className="size-3.5" /> {formattedDistance}</p>
+        </div>
+        <div className="rounded-lg bg-slate-50 p-2">
+          <p className="font-bold text-slate-500">Last updated</p>
+          <p className="mt-1 flex items-center gap-1 font-semibold"><Clock3 className="size-3.5" /> {result.lastUpdated ? new Date(result.lastUpdated).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "Not available"}</p>
+        </div>
+      </div>
+
+      <div className="mt-3 rounded-lg border border-red-100 bg-red-50 p-2.5 text-xs text-red-900">
+        <p className="font-bold">🩸 Requirement</p>
+        <p className="mt-1">{result.bloodGroup || "Blood group not specified"} / {result.component || "Component not specified"}</p>
+      </div>
+
+      <div className="mt-3 flex items-center justify-between gap-2 text-xs">
+        <div className="min-w-0 flex-1">
+          <p className="font-bold text-slate-600">📦 Availability</p>
+          <p className="mt-1 break-words text-slate-800">{availability}</p>
+        </div>
+        {result.verified === false ? <span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-800">Unverified</span> : null}
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {result.phone ? (
+          <a href={`tel:${result.phone}`} className="inline-flex items-center gap-1 rounded-lg bg-emerald-700 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-800">
+            <Phone className="size-3.5" />Call
+          </a>
+        ) : null}
+        {directionsUrl ? (
+          <a href={directionsUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">
+            <Navigation className="size-3.5" />Directions
+          </a>
+        ) : null}
+      </div>
+      {result.source ? <p className="mt-2 text-[11px] text-slate-500">Source: {result.source}</p> : null}
+    </div>
+  );
+}
+
 function ResponseBody({ response }: { response: SahayakResponse }) {
   const [copiedNumber, setCopiedNumber] = useState("");
+
+  if (response.bloodResults && response.bloodResults.length > 0) {
+    return (
+      <div className="space-y-3 text-sm leading-6">
+        <p className="text-sm font-bold text-slate-800">
+          {response.bloodSearchMessage || "Nearby blood bank results"}
+        </p>
+        {response.bloodQuery ? (
+          <p className="text-xs text-slate-600">
+            {response.bloodQuery.bloodGroup || "Blood group"} • {response.bloodQuery.component || "Component unspecified"} • {response.bloodQuery.units ? `${response.bloodQuery.units} units` : "Units unspecified"}
+          </p>
+        ) : null}
+        <div className="space-y-3">
+          {response.bloodResults.map((result, index) => <BloodResultCard key={`${result.name ?? 'blood-bank'}-${index}`} result={result} />)}
+        </div>
+        <p className="text-xs text-slate-600">Please call the blood bank to confirm availability before travelling.</p>
+      </div>
+    );
+  }
 
   if (response.emergency && response.emergencyScenario) {
     const emergency = getEmergencyGuidance(response.emergencyScenario);
@@ -139,6 +248,8 @@ export default function SahayakChat({ onNavigate }: { onNavigate: (view: View) =
   const [isOnline, setIsOnline] = useState(true);
   const [offlineFallback, setOfflineFallback] = useState(false);
   const [showDirectory, setShowDirectory] = useState(false);
+  const [bloodRequestInProgress, setBloodRequestInProgress] = useState(false);
+  const [bloodLocationPrompt, setBloodLocationPrompt] = useState<ReturnType<typeof detectBloodAssistance> | null>(null);
   const [messages, setMessages] = useState<Message[]>([
     { id: 1, author: "sahayak", text: "Hello! I am Sahayak. Tell me about a local problem or ask how the portal can help." },
   ]);
@@ -162,6 +273,89 @@ export default function SahayakChat({ onNavigate }: { onNavigate: (view: View) =
     };
   }, []);
 
+  async function runBloodLookup(intent: ReturnType<typeof detectBloodAssistance>) {
+    const bloodGroup = intent?.bloodGroup;
+    if (!intent || !bloodGroup) return;
+
+    setBloodRequestInProgress(true);
+
+    const requestLocation = () => new Promise<{ latitude: number; longitude: number }>((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error("Geolocation is not supported by this browser."));
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => resolve({ latitude: position.coords.latitude, longitude: position.coords.longitude }),
+        (error) => reject(new Error(error.message || "Location permission was denied.")),
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+      );
+    });
+
+    try {
+      if (process.env.NODE_ENV !== "production") {
+        console.log("[Sahayak][Blood] searching:", { bloodGroup, component: intent.component, units: intent.units });
+      }
+      const coords = await requestLocation();
+      const result = await searchBloodBanks({
+        bloodGroup,
+        component: intent.component || "Whole Blood",
+        units: intent.units || 1,
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        radiusKm: 25,
+      });
+
+      const banks = result.success && result.data ? (result.data.results ?? []) : [];
+      const message = !result.success
+        ? (result.message || "Live blood-stock availability could not be verified right now.")
+        : banks.length > 0
+          ? (result.data?.message || "Nearby blood banks found for your request.")
+          : "No verified blood-bank results were found for the requested blood group in the selected area.";
+
+      setMessages((current) => [...current, {
+        id: Date.now() + 10,
+        author: "sahayak",
+        response: {
+          message: message,
+          bloodResults: banks.map((bank) => ({
+            name: bank.name,
+            address: bank.address,
+            distanceKm: bank.distanceKm,
+            availability: bank.availability || "unknown",
+            lastUpdated: bank.lastUpdated ?? null,
+            phone: bank.phone,
+            latitude: bank.latitude,
+            longitude: bank.longitude,
+            bloodGroup,
+            component: intent.component,
+            units: bank.units,
+            source: bank.source || result.data?.source,
+            verified: bank.verified,
+          })),
+          bloodQuery: { bloodGroup, component: intent.component || "Whole Blood", units: intent.units || 1 },
+          bloodSearchMessage: message,
+        },
+      }]);
+    } catch (error) {
+      const fallbackMessage = error instanceof Error && error.message.includes("denied")
+        ? "Location permission nahi mili. Aap apna city/location enter kar sakte hain."
+        : "Location unavailable hai. Aap apna city ya location enter karke blood bank search kar sakte hain.";
+
+      setMessages((current) => [...current, {
+        id: Date.now() + 11,
+        author: "sahayak",
+        response: {
+          message: fallbackMessage,
+          bloodResults: [],
+        },
+      }]);
+    } finally {
+      setBloodRequestInProgress(false);
+      setBloodLocationPrompt(null);
+    }
+  }
+
   async function sendMessage(event?: React.FormEvent, preset?: string) {
     event?.preventDefault();
     const problem = (preset ?? input).trim();
@@ -169,6 +363,36 @@ export default function SahayakChat({ onNavigate }: { onNavigate: (view: View) =
     setError("");
     if (!preset) setInput("");
     setMessages((current) => [...current, { id: Date.now(), author: "user", text: problem }]);
+
+    const bloodIntent = detectBloodAssistance(problem);
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[Sahayak][Blood] message:", problem);
+      console.log("[Sahayak][Blood] detection:", bloodIntent);
+      console.log("[Sahayak][Blood] bloodGroup:", bloodIntent?.bloodGroup ?? null);
+    }
+    if (bloodIntent) {
+      setSending(true);
+      if (!bloodIntent.bloodGroup) {
+        setMessages((current) => [...current, {
+          id: Date.now() + 1,
+          author: "sahayak",
+          text: "Kaunsa blood group chahiye? Jaise B+, O+, A-, AB+.",
+        }]);
+        setSending(false);
+        return;
+      }
+
+      setBloodLocationPrompt(bloodIntent);
+      const confirmation: Message = {
+        id: Date.now() + 1,
+        author: "sahayak",
+        text: "Bilkul. Nearby blood banks check karne ke liye aapki location chahiye.",
+      };
+      setMessages((current) => [...current, confirmation]);
+      setSending(false);
+      return;
+    }
+
     setSending(true);
     const localResponse = getOfflineSahayakResponse(problem, language);
     const response = localResponse.emergency || !isOnline
@@ -200,7 +424,19 @@ export default function SahayakChat({ onNavigate }: { onNavigate: (view: View) =
                 </div>
               </div>
             ))}
-            {sending ? <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="size-4 animate-spin" />Sahayak is thinking...</div> : null}
+            {bloodLocationPrompt ? (
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3">
+                <p className="text-xs font-bold uppercase tracking-wide text-emerald-800">Blood assistance</p>
+                <button
+                  type="button"
+                  onClick={() => void runBloodLookup(bloodLocationPrompt)}
+                  className="mt-2 inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-800"
+                >
+                  <MapPin className="size-3.5" />📍 Use My Location
+                </button>
+              </div>
+            ) : null}
+            {sending || bloodRequestInProgress ? <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="size-4 animate-spin" />{bloodRequestInProgress ? "Finding nearby blood banks..." : "Sahayak is thinking..."}</div> : null}
             <div ref={messagesEndRef} />
           </div>
           {error ? <p role="alert" className="border-t border-red-100 bg-red-50 px-4 py-2 text-xs text-red-700">{error}</p> : null}

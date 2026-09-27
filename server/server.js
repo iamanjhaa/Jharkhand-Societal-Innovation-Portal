@@ -15,6 +15,7 @@ import sahayakRoutes from './routes/sahayakRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
 import industryRoutes from './routes/industryRoutes.js';
 import clubRoutes from './routes/clubRoutes.js';
+import sankalpRoutes from './routes/sankalpRoutes.js';
 import aiRoutes from './routes/aiRoutes.js';
 import locationRoutes from './routes/locationRoutes.js';
 import rewardRoutes from './routes/rewardRoutes.js';
@@ -67,6 +68,7 @@ app.use('/api/emergency', emergencyRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/industry', industryRoutes);
 app.use('/api/clubs', clubRoutes);
+app.use('/api/sankalp', sankalpRoutes);
 
 // 404 Middleware
 app.use(notFound);
