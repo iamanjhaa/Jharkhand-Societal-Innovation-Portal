@@ -19,9 +19,18 @@ function universityUser(overrides = {}) {
 }
 
 test('Sankalp Club is assignable but is not an academic department', () => {
+  assert.deepEqual(UNIVERSITY_DEPARTMENTS, [
+    'Computer Science & IT',
+    'Civil Engineering',
+    'Electrical & Electronics',
+    'Mechanical Engineering',
+    'Environmental & Agriculture',
+    'Social Sciences & Management'
+  ]);
   assert.equal(UNIVERSITY_DEPARTMENTS.includes('Sankalp Club'), false);
   assert.equal(UNIVERSITY_ASSIGNMENT_DEPARTMENTS.includes('Sankalp Club'), true);
   assert.equal(UNIVERSITY_ASSIGNMENT_DEPARTMENTS.length, UNIVERSITY_DEPARTMENTS.length + 1);
+  assert.deepEqual(UNIVERSITY_ASSIGNMENT_DEPARTMENTS, [...UNIVERSITY_DEPARTMENTS, 'Sankalp Club']);
 });
 
 test('ordinary users do not receive default Sankalp membership data', () => {

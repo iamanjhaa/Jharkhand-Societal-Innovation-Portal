@@ -225,7 +225,11 @@ export const createProject = async (req, res, next) => {
     await project.populate([
       { path: 'createdBy', select: 'name email institution universityDepartment' },
       { path: 'university', select: 'name email institution universityDepartment' },
-      { path: 'challenge', select: 'title category district status industryFundingStatus industryFundingAmount industryFundingAcceptedAt' },
+      {
+        path: 'challenge',
+        select: 'title category district status industryFundingStatus industryFundingAmount industryFundingAt industryFundingAcceptedAt industryFundedBy',
+        populate: { path: 'industryFundedBy', select: 'name organizationName organizationType' }
+      },
       { path: 'teamMembers', select: 'name email institution universityDepartment accountType' },
       { path: 'facultyMentor', select: 'name email institution universityDepartment accountType' },
       { path: 'industryPartners', select: 'name email organizationName organizationType' }
@@ -316,7 +320,11 @@ export const getAllProjects = async (req, res, next) => {
       .populate([
         { path: 'createdBy', select: 'name email institution universityDepartment' },
         { path: 'university', select: 'name email institution universityDepartment' },
-        { path: 'challenge', select: 'title category district status' },
+        {
+          path: 'challenge',
+          select: 'title category district status industryFundingStatus industryFundingAmount industryFundingAt industryFundingAcceptedAt industryFundedBy',
+          populate: { path: 'industryFundedBy', select: 'name organizationName organizationType' }
+        },
         { path: 'teamMembers', select: 'name email institution universityDepartment accountType' },
         { path: 'facultyMentor', select: 'name email institution universityDepartment accountType' },
         { path: 'industryPartners', select: 'name email organizationName organizationType' }
@@ -344,7 +352,11 @@ export const getProjectById = async (req, res, next) => {
       .populate([
         { path: 'createdBy', select: 'name email institution universityDepartment' },
         { path: 'university', select: 'name email institution universityDepartment' },
-        { path: 'challenge', select: 'title category district status description industryFundingStatus industryFundingAmount industryFundingAcceptedAt' },
+        {
+          path: 'challenge',
+          select: 'title category district status description industryFundingStatus industryFundingAmount industryFundingAt industryFundingAcceptedAt industryFundedBy',
+          populate: { path: 'industryFundedBy', select: 'name organizationName organizationType' }
+        },
         { path: 'teamMembers', select: 'name email institution universityDepartment accountType' },
         { path: 'facultyMentor', select: 'name email institution universityDepartment accountType' },
         { path: 'industryPartners', select: 'name email organizationName organizationType expertise' }

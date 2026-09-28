@@ -708,7 +708,18 @@ export async function getProjects() {
     _id: string;
     title: string;
     description: string;
-    challenge?: { _id?: string; title?: string; category?: string; district?: string; status?: string; industryFundingStatus?: string; industryFundingAmount?: number; industryFundingAcceptedAt?: string };
+    challenge?: {
+      _id?: string;
+      title?: string;
+      category?: string;
+      district?: string;
+      status?: string;
+      industryFundingStatus?: string;
+      industryFundingAmount?: number;
+      industryFundingAt?: string;
+      industryFundingAcceptedAt?: string;
+      industryFundedBy?: { _id?: string; name?: string; organizationName?: string; organizationType?: string } | string;
+    };
     university?: { _id?: string; name?: string; institution?: string; universityDepartment?: string };
     universityDepartment?: string;
     facultyMentor?: { _id?: string; name?: string; accountType?: string; universityDepartment?: string };
@@ -776,7 +787,19 @@ export async function getProjectById(id: string) {
     _id: string;
     title: string;
     description: string;
-    challenge?: { _id?: string; title?: string; category?: string; district?: string; status?: string; description?: string; industryFundingStatus?: string; industryFundingAmount?: number; industryFundingAcceptedAt?: string };
+    challenge?: {
+      _id?: string;
+      title?: string;
+      category?: string;
+      district?: string;
+      status?: string;
+      description?: string;
+      industryFundingStatus?: string;
+      industryFundingAmount?: number;
+      industryFundingAt?: string;
+      industryFundingAcceptedAt?: string;
+      industryFundedBy?: { _id?: string; name?: string; organizationName?: string; organizationType?: string } | string;
+    };
     university?: { _id?: string; name?: string; institution?: string; universityDepartment?: string };
     universityDepartment?: string;
     projectType: string;

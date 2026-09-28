@@ -222,6 +222,10 @@ export const acceptSponsorship = async (req, res, next) => {
     challenge.fundingApprovedAt = null;
     challenge.status = 'accepted';
     await challenge.save();
+    await challenge.populate({
+      path: 'industryFundedBy',
+      select: 'name organizationName organizationType'
+    });
     void createNotification({
       recipient: sponsorship.industry,
       recipientRole: 'industry',
