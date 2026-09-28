@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Bot, ChevronDown, Clock3, Loader2, MapPin, Navigation, Phone, Send, Sparkles, X } from "lucide-react";
-import { chatWithSahayak, searchBloodBanks } from "@/lib/api";
+import { chatWithSahayak, createEmergencyRequest, searchBloodBanks } from "@/lib/api";
 import { detectBloodAssistance } from "@/lib/blood-assistance";
 import { emergencyHelplines, getEmergencyGuidance } from "@/lib/emergency-helplines";
 import { getOfflineSahayakResponse } from "@/lib/offline-sahayak";
 import EmergencyVoiceMode from "@/components/emergency-voice-mode";
+import { parseEmergencyCommand } from "@/shared/emergency-intent.mjs";
 
 type BloodBankResult = {
   name?: string | null;
@@ -365,11 +366,6 @@ export default function SahayakChat({ onNavigate }: { onNavigate: (view: View) =
     setMessages((current) => [...current, { id: Date.now(), author: "user", text: problem }]);
 
     const bloodIntent = detectBloodAssistance(problem);
-    if (process.env.NODE_ENV !== "production") {
-      console.log("[Sahayak][Blood] message:", problem);
-      console.log("[Sahayak][Blood] detection:", bloodIntent);
-      console.log("[Sahayak][Blood] bloodGroup:", bloodIntent?.bloodGroup ?? null);
-    }
     if (bloodIntent) {
       setSending(true);
       if (!bloodIntent.bloodGroup) {
@@ -390,6 +386,77 @@ export default function SahayakChat({ onNavigate }: { onNavigate: (view: View) =
       };
       setMessages((current) => [...current, confirmation]);
       setSending(false);
+      return;
+    }
+
+    const emergencyIntent = parseEmergencyCommand(problem);
+    if (emergencyIntent) {
+      console.info("[EMERGENCY] intent detected", { emergencyType: emergencyIntent.emergencyType });
+      setSending(true);
+      let location: { latitude: number; longitude: number; accuracy: number } | null = null;
+      if (navigator.geolocation) {
+        location = await new Promise((resolve) => {
+          let settled = false;
+          const finish = (value: typeof location) => {
+            if (settled) return;
+            settled = true;
+            resolve(value);
+          };
+          const timeout = window.setTimeout(() => finish(null), 2500);
+          navigator.geolocation.getCurrentPosition(
+            (position) => {
+              window.clearTimeout(timeout);
+              finish({
+                latitude: position.coords.latitude,
+                longitude: position.coords.longitude,
+                accuracy: position.coords.accuracy,
+              });
+            },
+            () => {
+              window.clearTimeout(timeout);
+              finish(null);
+            },
+            { enableHighAccuracy: false, timeout: 2500, maximumAge: 30_000 },
+          );
+        });
+      }
+
+      const response = await createEmergencyRequest({
+        command: problem,
+        intent: emergencyIntent.emergencyType,
+        source: "WEB",
+        ...(location ? {
+          latitude: location.latitude,
+          longitude: location.longitude,
+          locationAccuracy: location.accuracy,
+          locationTimestamp: new Date().toISOString(),
+        } : {}),
+      });
+      setSending(false);
+      if (!response.success || !response.data) {
+        setMessages((current) => [...current, {
+          id: Date.now() + 1,
+          author: "sahayak",
+          text: `${response.message || "I could not activate the emergency alert."} If you are in immediate danger, call 112 or your local emergency service now.`,
+        }]);
+        return;
+      }
+
+      const results = response.data.smsResults || [];
+      const accepted = results.filter((result) => result.status === "sent").length;
+      const failed = results.filter((result) => result.status === "failed").length;
+      const summary = response.data.emergency.smsStatus === "SMS_NOT_CONFIGURED"
+        ? "SMS is not configured on the server, so no SMS was sent."
+        : results.length === 0
+        ? "No active emergency contacts are saved yet, so no SMS was sent."
+        : `${accepted} of ${results.length} emergency contact alert requests were accepted by Twilio${failed ? `; ${failed} could not be sent` : ""}.`;
+      const locationMessage = location ? "Your current location was included in the alert." : "Your location could not be retrieved; the alert was sent without coordinates.";
+      setMessages((current) => [...current, {
+        id: Date.now() + 1,
+        author: "sahayak",
+        text: `🚨 Emergency alert activated.\n\n${summary}\n${locationMessage}\nEmergency mode remains active for six hours. SMS acceptance is not a guarantee of carrier delivery. If possible, move to a safe place and contact local emergency services.`,
+      }]);
+      window.dispatchEvent(new Event("sahayak:emergency-session-updated"));
       return;
     }
 

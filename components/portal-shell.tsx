@@ -1248,17 +1248,10 @@ function Dashboard({ currentUser, setView, onRewardsChanged }: { currentUser: Re
 
 export default function PortalShell() {
   const router = useRouter();
-  const initialUser = getCurrentUserFromStorage();
-  const initialDashboard = resolveDashboardView(initialUser?.role, initialUser?.accountType, initialUser?.universityRole);
-  const [view, setView] = useState<View>(initialDashboard || "home");
-  const [role, setRole] = useState<Role>(
-    initialDashboard === "government" ? "Government"
-      : initialDashboard === "university" ? "University"
-        : initialDashboard === "industry" ? "Industry"
-          : "Citizen",
-  );
-  const [authenticated, setAuthenticated] = useState(Boolean(getAuthToken() && initialDashboard));
-  const [currentUser, setCurrentUser] = useState<Record<string, any> | null>(initialUser);
+  const [view, setView] = useState<View>("home");
+  const [role, setRole] = useState<Role>("Citizen");
+  const [authenticated, setAuthenticated] = useState(false);
+  const [currentUser, setCurrentUser] = useState<Record<string, any> | null>(null);
   const [studentProfileRequired, setStudentProfileRequired] = useState(false);
   const [open, setOpen] = useState(true);
   const [governmentAction, setGovernmentAction] = useState('');
@@ -1303,7 +1296,36 @@ export default function PortalShell() {
       if (restoreSessionStarted.current) return;
       restoreSessionStarted.current = true;
       if (!getAuthToken()) return;
+
+      function applyUser(user: Record<string, any>) {
+        const userRole = user.role;
+        if (!["citizen", "government", "university", "industry"].includes(userRole)) {
+          clearAuthToken();
+          router.replace("/login");
+          return;
+        }
+        const dashboardView = resolveDashboardView(userRole, user.accountType, user.universityRole);
+        if (!dashboardView) {
+          clearAuthToken();
+          router.replace("/login");
+          return;
+        }
+        const nextRole = dashboardView === "government" ? "Government" : dashboardView === "university" ? "University" : dashboardView === "industry" ? "Industry" : "Citizen";
+        setCurrentUser(user);
+        setStudentProfileRequired(
+          userRole === "university"
+          && (!user.accountType
+            || (["student", "researcher"].includes(user.accountType) && (!user.universityDepartment || !user.primaryClub))),
+        );
+        setRole(nextRole);
+        setAuthenticated(true);
+        setView(dashboardView);
+        if (nextRole === "University" && user.universityRole === "innovation_coordinator") setCoordinatorSection("dashboard");
+      }
+
       if (sessionStorage.getItem('auth_session_fresh') === '1') {
+        const storedUser = getCurrentUserFromStorage();
+        if (storedUser) applyUser(storedUser);
         return;
       }
       const response = await getCurrentUser();
@@ -1312,30 +1334,8 @@ export default function PortalShell() {
         router.replace("/login");
         return;
       }
-      const userRole = response.data.user.role;
-      if (!["citizen", "government", "university", "industry"].includes(userRole)) {
-        clearAuthToken();
-        router.replace("/login");
-        return;
-      }
-      const dashboardView = resolveDashboardView(userRole, response.data.user.accountType, response.data.user.universityRole);
-      if (!dashboardView) {
-        clearAuthToken();
-        router.replace("/login");
-        return;
-      }
-      const nextRole = dashboardView === "government" ? "Government" : dashboardView === "university" ? "University" : dashboardView === "industry" ? "Industry" : "Citizen";
       saveCurrentUser(response.data.user);
-      setCurrentUser(response.data.user);
-      setStudentProfileRequired(
-        userRole === "university"
-        && (!response.data.user.accountType
-          || (["student", "researcher"].includes(response.data.user.accountType) && (!response.data.user.universityDepartment || !response.data.user.primaryClub))),
-      );
-      setRole(nextRole);
-      setAuthenticated(true);
-      setView(dashboardView);
-      if (nextRole === "University" && response.data.user.universityRole === "innovation_coordinator") setCoordinatorSection("dashboard");
+      applyUser(response.data.user);
     }
     void restoreSession();
   }, [router]);

@@ -349,7 +349,8 @@ export async function chatWithSahayak(problem: string, language: 'en' | 'hi' = '
 
 export async function transcribeEmergencyAudio(audio: Blob) {
   const form = new FormData();
-  form.append('audio', audio, 'emergency.webm');
+  const extension = audio.type.includes('mp4') ? 'mp4' : audio.type.includes('ogg') ? 'ogg' : audio.type.includes('mpeg') ? 'mp3' : 'webm';
+  form.append('audio', audio, `emergency.${extension}`);
   return apiCall<{ transcript: string }>('/api/sahayak/transcribe', { method: 'POST', body: form });
 }
 
@@ -357,25 +358,48 @@ export type EmergencyHelper = {
   _id: string;
   name: string;
   phone: string;
+  relationship?: string;
   priority: number;
   enabled: boolean;
   alertEnabled: boolean;
 };
 
+export type EmergencySmsResult = {
+  contactName: string;
+  status: 'pending' | 'sent' | 'failed';
+  sentAt: string | null;
+};
+
 export type EmergencyRequest = {
-  _id: string;
-  type: 'ACCIDENT' | 'MEDICAL_EMERGENCY' | 'FIRE' | 'FLOOD_DISASTER' | 'GENERAL_EMERGENCY' | 'CALL_EMERGENCY_HELPER' | 'NORMAL';
-  command: string;
-  status: 'TRIGGERED' | 'ALERTING' | 'HELPER_CONTACTED' | 'HELPER_RESPONDED' | 'RESOLVED' | 'CANCELLED' | 'FAILED';
+  id: string;
+  type: 'ACCIDENT' | 'INJURY' | 'MEDICAL_EMERGENCY' | 'DANGER' | 'OTHER_CRITICAL_EMERGENCY' | 'FIRE' | 'FLOOD_DISASTER' | 'GENERAL_EMERGENCY' | 'CALL_EMERGENCY_HELPER' | 'NORMAL';
+  description: string;
+  status: 'TRIGGERED' | 'ALERTING' | 'HELPER_CONTACTED' | 'HELPER_RESPONDED' | 'RESOLVED' | 'CANCELLED' | 'FAILED' | 'EXPIRED';
   latitude: number | null;
   longitude: number | null;
-  locationAccuracy: number | null;
+  locationTimestamp: string | null;
   triggeredAt: string;
-  createdAt: string;
+  expiresAt: string;
+  resolvedAt: string | null;
+  contactsAlerted: number;
+  smsStatus: string;
+  smsResults: EmergencySmsResult[];
 };
 
 export async function getEmergencySettings() {
   return apiCall<{ enabled: boolean; helpers: EmergencyHelper[] }>('/api/emergency/helpers', { method: 'GET' });
+}
+
+export type SmsConfigurationDiagnostics = {
+  providerConfigured: boolean;
+  accountIdConfigured: boolean;
+  apiKeyConfigured: boolean;
+  apiSecretConfigured: boolean;
+  fromNumberConfigured: boolean;
+};
+
+export async function getSmsConfigurationDiagnostics() {
+  return apiCall<SmsConfigurationDiagnostics>('/api/emergency/sms-config', { method: 'GET' });
 }
 
 export async function setEmergencyVoiceMode(enabled: boolean) {
@@ -385,14 +409,14 @@ export async function setEmergencyVoiceMode(enabled: boolean) {
   });
 }
 
-export async function createEmergencyHelper(data: { name: string; phone: string }) {
+export async function createEmergencyHelper(data: { name: string; phone: string; relationship?: string }) {
   return apiCall<EmergencyHelper>('/api/emergency/helpers', {
     method: 'POST',
     body: JSON.stringify(data),
   });
 }
 
-export async function updateEmergencyHelper(id: string, data: Partial<Pick<EmergencyHelper, 'name' | 'phone' | 'priority' | 'enabled' | 'alertEnabled'>>) {
+export async function updateEmergencyHelper(id: string, data: Partial<Pick<EmergencyHelper, 'name' | 'phone' | 'relationship' | 'enabled' | 'alertEnabled'>>) {
   return apiCall<EmergencyHelper>(`/api/emergency/helpers/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify(data),
@@ -407,10 +431,37 @@ export async function getEmergencyRequests() {
   return apiCall<EmergencyRequest[]>('/api/emergency/requests/me', { method: 'GET' });
 }
 
-export async function cancelEmergencyRequest(id: string) {
-  return apiCall<EmergencyRequest>(`/api/emergency/requests/${encodeURIComponent(id)}/cancel`, {
-    method: 'PATCH',
+export async function getActiveEmergency() {
+  return apiCall<EmergencyRequest | null>('/api/emergency/active', { method: 'GET' });
+}
+
+export async function createEmergencyRequest(data: {
+  command: string;
+  intent: string;
+  source?: 'WEB' | 'ANDROID';
+  latitude?: number;
+  longitude?: number;
+  locationAccuracy?: number;
+  locationTimestamp?: string;
+}) {
+  console.info("[EMERGENCY] create request started");
+  const response = await apiCall<{ emergency: EmergencyRequest; emergencyId: string; alertCount: number; smsResults: EmergencySmsResult[] }>('/api/emergency/create', {
+    method: 'POST',
+    body: JSON.stringify(data),
   });
+  console.info("[EMERGENCY] create response", {
+    success: response.success,
+    message: response.success ? undefined : response.message,
+  });
+  return response;
+}
+
+export async function resolveEmergencyRequest(id: string) {
+  return apiCall<EmergencyRequest>(`/api/emergency/resolve/${encodeURIComponent(id)}`, { method: 'POST' });
+}
+
+export async function cancelEmergencyRequest(id: string) {
+  return apiCall<EmergencyRequest>(`/api/emergency/requests/${encodeURIComponent(id)}/cancel`, { method: 'PATCH' });
 }
 
 export async function detectUrgency(details: {

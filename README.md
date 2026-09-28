@@ -281,6 +281,14 @@ Sankalp Club is a special problem assignment destination, separate from the six 
 
 The Sankalp APIs are authenticated under `/api/sankalp`: `GET /mentors` and `POST /mentors` are University Coordinator operations, `GET /students?organization=NCC|NSS` and `POST /assign-students` require an active Sankalp Club Mentor profile, and `POST /challenges/:id/submit-for-verification` submits that mentor's assigned problem for Government verification.
 
+## Sahayak emergency SOS
+
+When a citizen tells Sahayak they are personally in immediate danger, the portal creates an authenticated emergency session and sends a predefined alert to the citizen's enabled emergency contacts. It does not send SMS for general accident questions or reports about other people. The citizen can save up to five contacts in Sahayak's **Emergency Contacts** panel; Indian 10-digit numbers are normalized to `+91`, while international numbers must include their country code.
+
+The server stores each emergency session for six hours and makes it available through `GET /api/emergency/active`, so an installed PWA can restore Emergency Mode after reopening. `POST /api/emergency/create` starts a session, and `POST /api/emergency/resolve/:id` resolves it. These routes use the existing JWT authentication and only operate on the signed-in citizen's contacts and sessions. Repeated creation requests return the active session without sending another initial SMS.
+
+SMS is server-only. Configure `SMS_PROVIDER=twilio`, `SMS_ACCOUNT_ID`, `SMS_API_KEY`, `SMS_API_SECRET`, and `SMS_FROM_NUMBER` in the project-root `.env`; never add credentials to `NEXT_PUBLIC_*` variables or commit them. Start the backend from `server` with `npm run dev`. If configuration is missing, the emergency session is still recorded and the UI reports that no SMS was sent. Twilio trial accounts may only message verified recipient numbers.
+
 ## Expected Impact
 Citizens
 

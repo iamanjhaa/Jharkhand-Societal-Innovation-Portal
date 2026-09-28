@@ -84,6 +84,12 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    emergencyHelperCount: {
+      type: Number,
+      min: 0,
+      max: 5,
+      select: false,
+    },
 
     // Government-specific fields
     department: {

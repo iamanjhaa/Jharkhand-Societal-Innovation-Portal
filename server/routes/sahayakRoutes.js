@@ -203,19 +203,25 @@ router.post('/chat', authMiddleware, async (req, res, next) => {
 });
 
 router.post('/transcribe', authMiddleware, audioUpload.single('audio'), async (req, res, next) => {
-  if (!req.file) return res.status(400).json({ success: false, message: 'Voice recording is required' });
-  if (String(process.env.STT_PROVIDER || '').toLowerCase() !== 'openai' || !process.env.STT_API_KEY) {
-    return res.status(503).json({ success: false, message: 'Speech transcription service is not configured' });
+  if (!req.file || req.file.size === 0) {
+    return res.status(400).json({ success: false, message: 'A non-empty voice recording is required' });
+  }
+
+  const provider = String(process.env.STT_PROVIDER || '').trim().toLowerCase();
+  const apiKey = String(process.env.STT_API_KEY || '').trim();
+  const model = String(process.env.STT_MODEL || 'whisper-1').trim();
+  if (provider !== 'openai' || !apiKey || !model) {
+    return res.status(500).json({ success: false, message: 'Speech transcription is not configured. Set STT_PROVIDER=openai, STT_API_KEY, and STT_MODEL in the server environment.' });
   }
 
   const form = new FormData();
   form.append('file', new Blob([req.file.buffer], { type: req.file.mimetype }), req.file.originalname || 'emergency.webm');
-  form.append('model', process.env.STT_MODEL || 'whisper-1');
+  form.append('model', model);
 
   try {
     const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${process.env.STT_API_KEY}` },
+      headers: { Authorization: `Bearer ${apiKey}` },
       body: form,
     });
     const data = await response.json();
