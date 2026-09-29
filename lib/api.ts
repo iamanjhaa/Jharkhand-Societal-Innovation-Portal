@@ -4,6 +4,7 @@ interface ApiResponse<T> {
   success: boolean;
   message?: string;
   data?: T;
+  statusCode?: number;
 }
 
 export async function assignChallengeDepartment(challengeId: string, department: string) {
@@ -62,7 +63,8 @@ function resolveApiUrl(endpoint: string) {
 
 export async function apiCall<T>(
   endpoint: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  timeoutMs = API_REQUEST_TIMEOUT_MS
 ): Promise<ApiResponse<T>> {
   const headers = new Headers(options.headers);
   if (!(typeof FormData !== 'undefined' && options.body instanceof FormData)) {
@@ -85,7 +87,7 @@ export async function apiCall<T>(
         removeExternalAbortListener = () => options.signal?.removeEventListener('abort', abortExternalRequest);
       }
     }
-    timeoutId = setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
+    timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     const response = await fetch(resolveApiUrl(endpoint), {
       ...options,
       headers,
@@ -109,6 +111,7 @@ export async function apiCall<T>(
       return {
         success: false,
         message: data.message || `HTTP Error: ${response.status}`,
+        statusCode: response.status,
       };
     }
 
@@ -344,7 +347,11 @@ export async function chatWithSahayak(problem: string, language: 'en' | 'hi' = '
   }>('/api/sahayak/chat', {
     method: 'POST',
     body: JSON.stringify({ problem, language }),
-  });
+  }, 40_000);
+}
+
+export async function getSahayakStatus() {
+  return apiCall<{ available: boolean }>('/api/sahayak/status', { method: 'GET' });
 }
 
 export async function transcribeEmergencyAudio(audio: Blob) {

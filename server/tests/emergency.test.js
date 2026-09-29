@@ -24,6 +24,9 @@ test('personal emergency examples activate the emergency intent', () => {
 
 test('general discussion and third-party accident reports do not activate SOS', () => {
   for (const phrase of [
+    'Hii',
+    'Hamare area mein paani ki problem hai',
+    'Road kharab hai',
     'There was an accident near my village yesterday',
     'I saw an accident on the road',
     'What is an accident?',

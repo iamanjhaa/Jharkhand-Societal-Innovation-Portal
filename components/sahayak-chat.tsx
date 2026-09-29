@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Bot, ChevronDown, Clock3, Loader2, MapPin, Navigation, Phone, Send, Sparkles, X } from "lucide-react";
-import { chatWithSahayak, createEmergencyRequest, searchBloodBanks } from "@/lib/api";
+import { chatWithSahayak, createEmergencyRequest, getSahayakStatus, searchBloodBanks } from "@/lib/api";
 import { detectBloodAssistance } from "@/lib/blood-assistance";
 import { emergencyHelplines, getEmergencyGuidance } from "@/lib/emergency-helplines";
 import { getOfflineSahayakResponse } from "@/lib/offline-sahayak";
@@ -246,8 +246,7 @@ export default function SahayakChat({ onNavigate }: { onNavigate: (view: View) =
   const [sending, setSending] = useState(false);
   const [language, setLanguage] = useState<"en" | "hi">("en");
   const [error, setError] = useState("");
-  const [isOnline, setIsOnline] = useState(true);
-  const [offlineFallback, setOfflineFallback] = useState(false);
+  const [aiStatus, setAiStatus] = useState<"checking" | "online" | "offline">("checking");
   const [showDirectory, setShowDirectory] = useState(false);
   const [bloodRequestInProgress, setBloodRequestInProgress] = useState(false);
   const [bloodLocationPrompt, setBloodLocationPrompt] = useState<ReturnType<typeof detectBloodAssistance> | null>(null);
@@ -255,22 +254,31 @@ export default function SahayakChat({ onNavigate }: { onNavigate: (view: View) =
     { id: 1, author: "sahayak", text: "Hello! I am Sahayak. Tell me about a local problem or ask how the portal can help." },
   ]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const statusRequestVersion = useRef(0);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, sending]);
 
   useEffect(() => {
-    const updateOnlineState = () => {
-      setIsOnline(navigator.onLine);
-      if (navigator.onLine) setOfflineFallback(false);
+    let active = true;
+    const checkSahayakStatus = async () => {
+      const requestVersion = statusRequestVersion.current;
+      try {
+        const result = await getSahayakStatus();
+        if (!active || requestVersion !== statusRequestVersion.current) return;
+        if (result.statusCode === 401 || result.statusCode === 403) return;
+        setAiStatus(result.success && result.data?.available ? "online" : "offline");
+      } catch (statusError) {
+        console.error("Unable to check Sahayak status", statusError);
+        if (active && requestVersion === statusRequestVersion.current) setAiStatus("offline");
+      }
     };
-    updateOnlineState();
-    window.addEventListener("online", updateOnlineState);
-    window.addEventListener("offline", updateOnlineState);
+    void checkSahayakStatus();
+    window.addEventListener("online", checkSahayakStatus);
     return () => {
-      window.removeEventListener("online", updateOnlineState);
-      window.removeEventListener("offline", updateOnlineState);
+      active = false;
+      window.removeEventListener("online", checkSahayakStatus);
     };
   }, []);
 
@@ -462,25 +470,65 @@ export default function SahayakChat({ onNavigate }: { onNavigate: (view: View) =
 
     setSending(true);
     const localResponse = getOfflineSahayakResponse(problem, language);
-    const response = localResponse.emergency || !isOnline
-      ? { success: true, data: localResponse }
-      : await chatWithSahayak(problem, language);
-    setSending(false);
-    if (!response.success || !response.data) {
-      setOfflineFallback(true);
-      setMessages((current) => [...current, { id: Date.now() + 1, author: "sahayak", response: getOfflineSahayakResponse(problem, language) }]);
+    if (localResponse.emergency) {
+      setMessages((current) => [...current, { id: Date.now() + 1, author: "sahayak", response: localResponse }]);
+      setSending(false);
       return;
     }
 
-    if ("offline" in response.data) setOfflineFallback(true);
-    setMessages((current) => [...current, { id: Date.now() + 1, author: "sahayak", response: response.data }]);
+    statusRequestVersion.current += 1;
+    try {
+      const response = await chatWithSahayak(problem, language);
+      if (!response.success || !response.data) {
+        if (response.statusCode && response.statusCode >= 400 && response.statusCode < 500) {
+          setMessages((current) => [...current, {
+            id: Date.now() + 1,
+            author: "sahayak",
+            text: response.message || "The request could not be completed. Please check your session and try again.",
+          }]);
+          return;
+        }
+        setAiStatus("offline");
+        const fallback = getOfflineSahayakResponse(problem, language);
+        const unavailableMessage = language === "hi"
+          ? "सहायक अभी उपलब्ध नहीं है। कृपया कुछ देर बाद फिर कोशिश करें।"
+          : "Sahayak is temporarily unavailable. Please try again in a moment.";
+        setMessages((current) => [...current, {
+          id: Date.now() + 1,
+          author: "sahayak",
+          response: { ...fallback, message: `${unavailableMessage}\n\n${fallback.message}` },
+        }]);
+        return;
+      }
+
+      if ("offline" in response.data && response.data.offline) {
+        setAiStatus("offline");
+      } else {
+        setAiStatus("online");
+      }
+      setMessages((current) => [...current, { id: Date.now() + 1, author: "sahayak", response: response.data }]);
+    } catch (requestError) {
+      console.error("Sahayak chat request failed", requestError);
+      setAiStatus("offline");
+      const fallback = getOfflineSahayakResponse(problem, language);
+      const unavailableMessage = language === "hi"
+        ? "सहायक अभी उपलब्ध नहीं है। कृपया कुछ देर बाद फिर कोशिश करें।"
+        : "Sahayak is temporarily unavailable. Please try again in a moment.";
+      setMessages((current) => [...current, {
+        id: Date.now() + 1,
+        author: "sahayak",
+        response: { ...fallback, message: `${unavailableMessage}\n\n${fallback.message}` },
+      }]);
+    } finally {
+      setSending(false);
+    }
   }
 
   return (
     <>
       <section className={`mobile-sahayak-window fixed inset-x-4 bottom-24 z-50 flex max-h-[min(680px,calc(100vh-7rem))] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl transition duration-200 sm:inset-auto sm:bottom-24 sm:right-6 sm:w-[min(410px,calc(100vw-2rem))] ${isOpen ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0"}`} aria-label="Sahayak chat" aria-hidden={!isOpen} inert={!isOpen ? true : undefined}>
           <header className="flex items-start justify-between gap-2 bg-emerald-900 px-3 py-3 text-white sm:gap-3 sm:px-4 sm:py-4">
-            <div className="flex min-w-0 items-center gap-2 sm:gap-3"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-orange-400 text-emerald-950"><Bot className="size-5" /></span><div className="min-w-0"><h2 className="font-bold">Sahayak</h2><p className="break-words text-xs text-emerald-100">Your AI assistant for the Jharkhand Innovation Portal</p><p className="mt-1 text-xs font-semibold">{isOnline && !offlineFallback ? "🟢 Sahayak AI — Online" : "🟠 Sahayak — Offline Assistance"}</p></div></div>
+            <div className="flex min-w-0 items-center gap-2 sm:gap-3"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-orange-400 text-emerald-950"><Bot className="size-5" /></span><div className="min-w-0"><h2 className="font-bold">Sahayak</h2><p className="break-words text-xs text-emerald-100">Your AI assistant for the Jharkhand Innovation Portal</p><p className="mt-1 text-xs font-semibold">{sending || aiStatus === "checking" ? "🟡 Sahayak — Connecting..." : aiStatus === "online" ? "🟢 Sahayak — Online" : "🟠 Sahayak — Offline Assistance"}</p></div></div>
             <div className="flex shrink-0 items-center gap-1"><label className="sr-only" htmlFor="sahayak-language">Language</label><select id="sahayak-language" value={language} onChange={(event) => setLanguage(event.target.value as "en" | "hi")} className="max-w-[84px] rounded-md border-0 bg-white/10 px-1 py-1 text-xs text-white outline-none [&>option]:text-slate-900"><option value="en">English</option><option value="hi">हिंदी</option></select><button onClick={() => setIsOpen(false)} aria-label="Close Sahayak" className="rounded-lg p-2 hover:bg-white/10"><X className="size-5" /></button></div>
           </header>
           <div className="flex-1 space-y-3 overflow-y-auto bg-slate-50 p-4" aria-live="polite">

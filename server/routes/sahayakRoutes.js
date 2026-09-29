@@ -9,6 +9,24 @@ function getSahayakApiUrl() {
   return (process.env.SAHAYAK_API_URL || 'http://localhost:8000').replace(/\/$/, '');
 }
 
+router.get('/status', authMiddleware, async (_req, res) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3_000);
+  try {
+    const response = await fetch(`${getSahayakApiUrl()}/health`, { signal: controller.signal });
+    const data = await response.json();
+    if (!response.ok || data.status !== 'ok' || data.providerConfigured !== true) {
+      return res.status(503).json({ success: false, message: 'Sahayak AI service is unavailable' });
+    }
+    return res.json({ success: true, data: { available: true } });
+  } catch (error) {
+    console.error(`Sahayak health check failed: ${error.message}`);
+    return res.status(503).json({ success: false, message: 'Sahayak AI service is unavailable' });
+  } finally {
+    clearTimeout(timeout);
+  }
+});
+
 function normalizeBloodGroup(value) {
   if (typeof value !== 'string') return '';
   const normalized = value.toUpperCase().replace(/\s+/g, '');
@@ -196,7 +214,8 @@ router.post('/chat', authMiddleware, async (req, res, next) => {
     return res.json({ success: true, data });
   } catch (error) {
     if (error.name === 'AbortError') return res.status(504).json({ success: false, message: 'Sahayak took too long to respond' });
-    return next(error);
+    console.error(`Sahayak request failed: ${error.message}`);
+    return res.status(503).json({ success: false, message: 'Sahayak AI service is unavailable' });
   } finally {
     clearTimeout(timeout);
   }

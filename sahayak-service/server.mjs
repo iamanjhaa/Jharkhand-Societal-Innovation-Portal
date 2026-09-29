@@ -62,6 +62,35 @@ function parseJsonContent(content) {
   return JSON.parse(withoutFence);
 }
 
+function isRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isOptionalString(value) {
+  return value === undefined || typeof value === 'string';
+}
+
+function isOptionalStringArray(value) {
+  return value === undefined || (Array.isArray(value) && value.every((item) => typeof item === 'string'));
+}
+
+function isGuidanceResponse(value) {
+  if (!isRecord(value)) return false;
+  if (!isOptionalString(value.message)) return false;
+  if (!isRecord(value.understanding) || typeof value.understanding.summary !== 'string') return false;
+  if (!isRecord(value.solution_info) || !isOptionalStringArray(value.solution_info.steps) || !isOptionalStringArray(value.solution_info.tools_materials)) return false;
+  if (!isOptionalString(value.solution_info.estimated_time) || !isOptionalString(value.solution_info.estimated_cost)) return false;
+  if (!isRecord(value.safety_guidance) || !isOptionalStringArray(value.safety_guidance.precautions) || !isOptionalString(value.safety_guidance.when_to_stop)) return false;
+  if (!isRecord(value.escalation) || typeof value.escalation.required !== 'boolean') return false;
+  if (!isOptionalString(value.escalation.contact) || !isOptionalString(value.escalation.reason)) return false;
+  if (!isOptionalStringArray(value.prevention)) return false;
+  if (!Array.isArray(value.helplines) || !value.helplines.every((item) => isRecord(item)
+    && isOptionalString(item.name)
+    && isOptionalString(item.number)
+    && isOptionalString(item.purpose))) return false;
+  return true;
+}
+
 async function generateRecommendationsExternal(context) {
   if (!apiKey || apiKey === 'replace_with_your_provider_api_key') {
     const error = new Error('Sahayak requires OPENROUTER_API_KEY to generate real AI responses');
@@ -230,7 +259,13 @@ async function generateGuidance(problem, language) {
       error.statusCode = 502;
       throw error;
     }
-    return parseJsonContent(content);
+    const result = parseJsonContent(content);
+    if (!isGuidanceResponse(result)) {
+      const error = new Error('AI provider returned an invalid Sahayak response');
+      error.statusCode = 502;
+      throw error;
+    }
+    return result;
   } finally {
     clearTimeout(timeout);
   }
