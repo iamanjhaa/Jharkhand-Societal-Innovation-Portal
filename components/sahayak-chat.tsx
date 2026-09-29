@@ -276,9 +276,11 @@ export default function SahayakChat({ onNavigate }: { onNavigate: (view: View) =
     };
     void checkSahayakStatus();
     window.addEventListener("online", checkSahayakStatus);
+    const statusInterval = window.setInterval(() => void checkSahayakStatus(), 30_000);
     return () => {
       active = false;
       window.removeEventListener("online", checkSahayakStatus);
+      window.clearInterval(statusInterval);
     };
   }, []);
 
@@ -520,6 +522,7 @@ export default function SahayakChat({ onNavigate }: { onNavigate: (view: View) =
         response: { ...fallback, message: `${unavailableMessage}\n\n${fallback.message}` },
       }]);
     } finally {
+      statusRequestVersion.current += 1;
       setSending(false);
     }
   }

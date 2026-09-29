@@ -347,7 +347,7 @@ export async function chatWithSahayak(problem: string, language: 'en' | 'hi' = '
   }>('/api/sahayak/chat', {
     method: 'POST',
     body: JSON.stringify({ problem, language }),
-  }, 40_000);
+  }, 55_000);
 }
 
 export async function getSahayakStatus() {

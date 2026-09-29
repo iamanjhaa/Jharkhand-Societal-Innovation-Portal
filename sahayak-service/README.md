@@ -34,5 +34,8 @@ SAHAYAK_API_URL=http://localhost:8000
 
 The service exposes `POST /chat` with `{ "problem": "...", "language": "en" }`
 or `"hi"`, and returns the structured JSON consumed by
-`components/sahayak-chat.tsx`. If the provider is not configured or fails, the
-service returns an error; it never fabricates a response.
+`components/sahayak-chat.tsx`. `GET /health` reports service readiness and
+whether the server-side OpenRouter configuration is present; the portal proxies
+this through its authenticated `GET /api/sahayak/status` route. If the provider
+is not configured or fails, the service returns an error; it never fabricates a
+response.

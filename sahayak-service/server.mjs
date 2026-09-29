@@ -70,6 +70,10 @@ function isOptionalString(value) {
   return value === undefined || typeof value === 'string';
 }
 
+function isOptionalBoolean(value) {
+  return value === undefined || typeof value === 'boolean';
+}
+
 function isOptionalStringArray(value) {
   return value === undefined || (Array.isArray(value) && value.every((item) => typeof item === 'string'));
 }
@@ -77,6 +81,7 @@ function isOptionalStringArray(value) {
 function isGuidanceResponse(value) {
   if (!isRecord(value)) return false;
   if (!isOptionalString(value.message)) return false;
+  if (!isOptionalString(value.severity) || !isOptionalBoolean(value.can_solve_myself)) return false;
   if (!isRecord(value.understanding) || typeof value.understanding.summary !== 'string') return false;
   if (!isRecord(value.solution_info) || !isOptionalStringArray(value.solution_info.steps) || !isOptionalStringArray(value.solution_info.tools_materials)) return false;
   if (!isOptionalString(value.solution_info.estimated_time) || !isOptionalString(value.solution_info.estimated_cost)) return false;
@@ -225,7 +230,7 @@ async function generateGuidance(problem, language) {
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30_000);
+  const timeout = setTimeout(() => controller.abort(), 40_000);
   try {
     const providerResponse = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
