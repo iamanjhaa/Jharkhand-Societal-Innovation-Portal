@@ -193,7 +193,7 @@ function mapProviderResults(rawResults, latitude, longitude, requestedBloodGroup
     });
 }
 
-router.post('/chat', authMiddleware, async (req, res, next) => {
+router.post('/chat', authMiddleware, async (req, res) => {
   const { problem, language } = req.body || {};
   if (typeof problem !== 'string' || !problem.trim()) {
     return res.status(400).json({ success: false, message: 'Problem text cannot be empty' });
